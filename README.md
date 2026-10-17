@@ -3,7 +3,9 @@
 [![Tests](https://github.com/hadalin/tempo-match/actions/workflows/test.yml/badge.svg)](https://github.com/hadalin/tempo-match/actions/workflows/test.yml)
 
 Pick a BPM, get a song at that tempo with a Spotify link. Live at <https://tempo-match.hadalin.me>.
-The dice button does the reverse: it picks a random popular Spotify track and sets the BPM to its tempo.
+The autoplay button next to Find a song cycles off, autoplay, and autoplay random. After you start the first song,
+autoplay plays another song at the same tempo when it ends; autoplay random picks a random popular Spotify track
+instead and sets the BPM to its tempo.
 
 Spotify no longer serves tempo data to new apps, so tempo comes from
 [GetSongBPM](https://getsongbpm.com/api) and [Deezer](https://developers.deezer.com/api).
@@ -22,7 +24,7 @@ Requires Node.js 24+. Copy `.env.example` to `.env` and fill in:
 | `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` | App at <https://developer.spotify.com/dashboard> (Web API; owner needs Premium) |
 
 Optional: `SPOTIFY_MARKET` (default `US`), `PORT` (default `3000`), `DEEZER_ENABLED=false`,
-`RECCOBEATS_ENABLED=false` (skips the [ReccoBeats](https://reccobeats.com) tempo check and turns off the dice button).
+`RECCOBEATS_ENABLED=false` (skips the [ReccoBeats](https://reccobeats.com) tempo check and turns off autoplay random).
 
 ```sh
 npm install

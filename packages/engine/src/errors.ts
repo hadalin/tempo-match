@@ -32,14 +32,14 @@ export class MissingConfigError extends Error {
 
 export class NoLuckyPickError extends Error {
   constructor() {
-    super("Couldn't find a lucky song, try again");
+    super("Couldn't find a random song, try again");
     this.name = 'NoLuckyPickError';
   }
 }
 
 export class LuckyDisabledError extends Error {
   constructor() {
-    super("I'm feeling lucky is turned off on this server");
+    super("Autoplay random is turned off on this server");
     this.name = 'LuckyDisabledError';
   }
 }

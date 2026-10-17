@@ -2,7 +2,7 @@ const form = document.getElementById('form');
 const slider = document.getElementById('bpm');
 const value = document.getElementById('value');
 const submit = document.getElementById('submit');
-const lucky = document.getElementById('lucky');
+const autoplayButton = document.getElementById('autoplay');
 const result = document.getElementById('result');
 const SPOTIFY_ID = /^[A-Za-z0-9]+$/;
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -45,6 +45,7 @@ const previewOnlyDevice = iosDevice();
 let autoplay = savedAutoplay();
 let autoplayUnavailable = false;
 let playback = null;
+let autoplayAnnouncement = null;
 
 function iosDevice() {
   const match = navigator.userAgent.match(IOS_DEVICE);
@@ -76,6 +77,7 @@ if (WHOLE_NUMBER.test(urlBpm ?? '')) {
   setBpm(MIN_START_BPM + Math.floor(Math.random() * (MAX_START_BPM - MIN_START_BPM + 1)));
 }
 form.className = '';
+showAutoplay();
 
 slider.addEventListener('input', () => { value.value = slider.value; });
 value.addEventListener('change', () => { setBpm(enteredBpm()); });
@@ -93,15 +95,14 @@ form.addEventListener('submit', async (event) => {
   await search(`/api/song?bpm=${slider.value}`);
 });
 
-lucky.addEventListener('click', async () => {
-  if (lucky.disabled) {
-    return;
-  }
-
-  await rollDice();
+autoplayButton.addEventListener('click', () => {
+  autoplay = AUTOPLAY_MODES[autoplay].next;
+  saveAutoplay();
+  showAutoplay();
+  announceAutoplay();
 });
 
-async function rollDice() {
+async function randomSong() {
   const song = await search(`/api/song?lucky=1&exclude=${slider.value}`);
   if (song) {
     setBpm(song.bpm);
@@ -114,7 +115,7 @@ async function playNext() {
     return;
   }
 
-  const song = autoplay === AUTOPLAY_RANDOM_TEMPO ? await rollDice() : await search(`/api/song?bpm=${slider.value}`);
+  const song = autoplay === AUTOPLAY_RANDOM_TEMPO ? await randomSong() : await search(`/api/song?bpm=${slider.value}`);
   if (song) {
     playback.play();
   }
@@ -148,12 +149,10 @@ async function search(url) {
 
 function disableSearch() {
   submit.disabled = true;
-  lucky.disabled = true;
 }
 
 function enableSearch() {
   submit.disabled = false;
-  lucky.disabled = false;
 }
 
 function retrySeconds(header) {
@@ -237,51 +236,42 @@ function showSong(song) {
     hint.textContent = `Previews only on ${previewOnlyDevice}. Full song: Play on Spotify.`;
     card.append(hint);
   }
-  const autoplaySlot = document.createElement('div');
-  autoplaySlot.replaceChildren(...autoplayControl());
-  card.append(play, web, autoplaySlot);
+  card.append(play, web);
+  if (autoplayUnavailable) {
+    card.append(autoplayNote(AUTOPLAY_UNAVAILABLE_NOTE));
+  }
   result.append(card);
 
   playback = watchSpotifyEmbed(embed, {
     ended: playNext,
-    blocked: () => { autoplaySlot.append(autoplayNote(PLAY_BLOCKED_NOTE)); },
+    blocked: () => { card.append(autoplayNote(PLAY_BLOCKED_NOTE)); },
     unavailable: () => {
       autoplayUnavailable = true;
-      autoplaySlot.replaceChildren(autoplayNote(AUTOPLAY_UNAVAILABLE_NOTE));
+      autoplayButton.disabled = true;
+      card.append(autoplayNote(AUTOPLAY_UNAVAILABLE_NOTE));
     },
   });
   return true;
 }
 
-function autoplayControl() {
-  if (autoplayUnavailable) {
-    return [autoplayNote(AUTOPLAY_UNAVAILABLE_NOTE)];
-  }
-
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'autoplay';
-  const status = document.createElement('p');
-  status.className = 'visually-hidden';
-  showAutoplay(button);
-  button.addEventListener('click', () => {
-    autoplay = AUTOPLAY_MODES[autoplay].next;
-    saveAutoplay();
-    showAutoplay(button);
-    status.textContent = `Autoplay ${AUTOPLAY_MODES[autoplay].state}`;
-  });
-  return [button, status];
-}
-
-function showAutoplay(button) {
+function showAutoplay() {
   const mode = AUTOPLAY_MODES[autoplay];
-  button.setAttribute('data-mode', autoplay);
-  button.setAttribute('aria-label', `Autoplay: ${mode.state}. Click to ${AUTOPLAY_ACTIONS[mode.next]}`);
+  autoplayButton.setAttribute('data-mode', autoplay);
+  autoplayButton.setAttribute('aria-label', `Autoplay: ${mode.state}. Click to ${AUTOPLAY_ACTIONS[mode.next]}`);
+  autoplayButton.title = mode.label;
   const icons = [loopIcon()];
   if (autoplay === AUTOPLAY_RANDOM_TEMPO) {
     icons.push(diceIcon());
   }
-  button.replaceChildren(...icons, mode.label);
+  autoplayButton.replaceChildren(...icons);
+}
+
+function announceAutoplay() {
+  autoplayAnnouncement?.remove();
+  autoplayAnnouncement = document.createElement('p');
+  autoplayAnnouncement.className = 'visually-hidden';
+  autoplayAnnouncement.textContent = `Autoplay ${AUTOPLAY_MODES[autoplay].state}`;
+  result.append(autoplayAnnouncement);
 }
 
 function autoplayNote(text) {

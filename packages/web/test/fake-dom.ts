@@ -15,11 +15,13 @@ export class FakeFrameWindow {
 export class FakeElement {
   id = '';
   className = '';
+  title = '';
   disabled = false;
   min = '';
   max = '';
   children: (FakeElement | string)[] = [];
   contentWindow: FakeFrameWindow | null = null;
+  private parent: FakeElement | null = null;
   private attributes = new Map<string, string>();
   private text = '';
   private listeners = new Map<string, Listener[]>();
@@ -41,11 +43,28 @@ export class FakeElement {
   }
 
   append(...nodes: (FakeElement | string)[]): void {
+    this.adopt(nodes);
     this.children.push(...nodes);
   }
 
   replaceChildren(...nodes: (FakeElement | string)[]): void {
+    this.adopt(nodes);
     this.children = nodes;
+  }
+
+  remove(): void {
+    if (this.parent) {
+      this.parent.children = this.parent.children.filter((child) => child !== this);
+    }
+    this.parent = null;
+  }
+
+  private adopt(nodes: (FakeElement | string)[]): void {
+    for (const node of nodes) {
+      if (typeof node !== 'string') {
+        node.parent = this;
+      }
+    }
   }
 
   setAttribute(name: string, value: string): void {

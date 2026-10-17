@@ -337,8 +337,8 @@ test('treats a lucky value other than 1 as a normal search', async () => {
 });
 
 for (const [label, error, status, message] of [
-  ['finds nothing', new NoLuckyPickError(), 404, "Couldn't find a lucky song, try again"],
-  ['is turned off', new LuckyDisabledError(), 503, "I'm feeling lucky is turned off on this server"],
+  ['finds nothing', new NoLuckyPickError(), 404, "Couldn't find a random song, try again"],
+  ['is turned off', new LuckyDisabledError(), 503, "Autoplay random is turned off on this server"],
   [
     'hits a failing service',
     new UpstreamError('ReccoBeats', 503),
