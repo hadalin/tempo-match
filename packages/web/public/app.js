@@ -14,7 +14,6 @@ const MIN_RETRY_SECONDS = 1;
 const MAX_RETRY_SECONDS = 120;
 const SECOND_MS = 1000;
 const DELTA_SECONDS = /^\d+$/;
-const WHOLE_NUMBER = /^\d+$/;
 const MIN_START_BPM = 80;
 const MAX_START_BPM = 130;
 const IOS_DEVICE = /\b(iPhone|iPad|iPod)\b/;
@@ -75,12 +74,7 @@ function enteredBpm() {
   return Number.isFinite(bpm) ? bpm : Number(slider.value);
 }
 
-const urlBpm = new URLSearchParams(location.search).get('bpm');
-if (WHOLE_NUMBER.test(urlBpm ?? '')) {
-  setBpm(Number(urlBpm));
-} else {
-  setBpm(MIN_START_BPM + Math.floor(Math.random() * (MAX_START_BPM - MIN_START_BPM + 1)));
-}
+setBpm(MIN_START_BPM + Math.floor(Math.random() * (MAX_START_BPM - MIN_START_BPM + 1)));
 form.className = '';
 showAutoplay();
 

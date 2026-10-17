@@ -257,27 +257,6 @@ test('re-enables Find a song after a failed search', async () => {
   assert.equal(app.result.textContent, 'Could not reach the server');
 });
 
-test('starts at the bpm given in the page URL', () => {
-  const app = loadApp(async () => Response.json(SONG), '?bpm=97');
-
-  assert.equal(String(app.slider.value), '97');
-  assert.equal(String(app.value.value), '97');
-});
-
-test('clamps a page URL bpm outside 40-220', () => {
-  const app = loadApp(async () => Response.json(SONG), '?bpm=999');
-
-  assert.equal(String(app.slider.value), '220');
-});
-
-for (const bpm of ['', 'abc', '97.5', '-5', '1e2', '0x61']) {
-  test(`ignores a page URL bpm of "${bpm}"`, () => {
-    const app = loadApp(async () => Response.json(SONG), `?bpm=${bpm}`);
-
-    assert.equal(String(app.slider.value), '120');
-  });
-}
-
 for (const [typed, bpm] of [['0', '40'], ['39', '40'], ['221', '220'], ['', '120'], ['  ', '120']]) {
   test(`sets a typed bpm of "${typed}" to ${bpm}`, async () => {
     const app = loadApp(async () => Response.json(SONG));
@@ -300,7 +279,7 @@ test('searches the lowest bpm when 0 is typed and submitted', async () => {
   assert.equal(fetch.mock.calls[0].arguments[0], '/api/song?bpm=40');
 });
 
-test('starts at a random bpm of at least 80 without a page URL bpm', () => {
+test('starts at a random bpm of at least 80', () => {
   mock.method(Math, 'random', () => 0);
   const app = loadApp(async () => Response.json(SONG));
 
@@ -308,7 +287,7 @@ test('starts at a random bpm of at least 80 without a page URL bpm', () => {
   assert.equal(String(app.value.value), '80');
 });
 
-test('starts at a random bpm of at most 130 without a page URL bpm', () => {
+test('starts at a random bpm of at most 130', () => {
   mock.method(Math, 'random', () => 0.999999);
   const app = loadApp(async () => Response.json(SONG));
 
@@ -316,16 +295,9 @@ test('starts at a random bpm of at most 130 without a page URL bpm', () => {
   assert.equal(String(app.value.value), '130');
 });
 
-test('prefers a page URL bpm over a random start', () => {
+test('starts at a random bpm even with a page URL bpm', () => {
   mock.method(Math, 'random', () => 0);
   const app = loadApp(async () => Response.json(SONG), '?bpm=97');
-
-  assert.equal(String(app.slider.value), '97');
-});
-
-test('starts at a random bpm for a page URL bpm that is not a whole number', () => {
-  mock.method(Math, 'random', () => 0);
-  const app = loadApp(async () => Response.json(SONG), '?bpm=abc');
 
   assert.equal(String(app.slider.value), '80');
 });
