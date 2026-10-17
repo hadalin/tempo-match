@@ -218,6 +218,53 @@ test('reports the provider failure when no other provider has songs', async () =
   assert.deepEqual(spotify.lookups, []);
 });
 
+// Titles from the content-quality scout report: its non-song leaks, and real songs it checked.
+const TITLE_CASES = [
+  ['Love Wins (Original Key Performance Track Without Background Vocals)', true],
+  ['Scene 7 - Learn To Speak Properly', true],
+  ['Skit 5', true],
+  ['Interview with HALIENE', true],
+  ['Track Commentary', true],
+  ['Billie Jean (Karaoke Version)', true],
+  ['Halo (Backing Track)', true],
+  ['Dreams (Made Famous by Fleetwood Mac)', true],
+  ['Dreams (Originally Performed by Fleetwood Mac)', true],
+  ['Valerie (Sound-a-like Version)', true],
+  ['Valerie (In the Style of Amy Winehouse)', true],
+  ['Kapitel 23', true],
+  ['Chapter 1: The Beginning', true],
+  ['Capítulo 4', true],
+  ['Rozdział 12', true],
+  ['Tardes de Bolonha (instrumental)', true],
+  ['Hotel California [Instrumental Version]', true],
+  ['Handel: Serse, HWV 40, Act 2, Scene 12: Duetto', false],
+  ['Intro', false],
+  ['Interlude', false],
+  ['Interviews', false],
+  ['Reprise', false],
+  ['Part 2', false],
+  ['Behind the Scene 3', false],
+  ['Instrumental Love', false],
+  ['Skittles', false],
+  ['Chapter', false],
+  ['Hotel California', false],
+] as const;
+
+for (const [title, rejected] of TITLE_CASES) {
+  test(`${rejected ? 'rejects' : 'keeps'} the provider title "${title}"`, async () => {
+    const spotify = catalog({ [title]: 'id' });
+
+    const match = createEngine([source([{ title, artist: 'A', bpm: 120 }])], spotify).matchSong(120);
+
+    if (rejected) {
+      await assert.rejects(match, NoMatchError);
+      assert.deepEqual(spotify.lookups, []);
+    } else {
+      assert.equal((await match).spotifyTrackId, 'id');
+    }
+  });
+}
+
 const POETRY_READING = {
   id: '0c61MQGXBiJKWKz6BUn0q2',
   name: 'When All the World Is Young, Lad',

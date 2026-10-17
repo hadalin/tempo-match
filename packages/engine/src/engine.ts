@@ -12,6 +12,17 @@ const TEMPO_TOLERANCE_BPM = 3;
 // Spotify documents tracks at or above this speechiness as probably all spoken words.
 const SPOKEN_WORD_SPEECHINESS = 0.66;
 const UNVERIFIED: TrackFeatures = { tempo: null, speechiness: null };
+// Karaoke, backing tracks, skits, interviews and audiobook chapters that the duration and
+// speechiness checks let through. Opera titles such as "Act 2, Scene 12" must still pass.
+const NON_SONG_TITLE = new RegExp(
+  [
+    String.raw`\b(skits?|interview|commentary|karaoke|(performance|backing) track|made famous by|originally performed by|sound-a-like|in the style of)\b`,
+    String.raw`\b(kapitel|chapter|cap[ií]tulo|chapitre|capitolo|hoofdstuk|kapittel|rozdział)\s*\d+`,
+    String.raw`^scene\s*\d+\b`,
+    String.raw`[([]\s*instrumental(\s+version)?\s*[)\]]`,
+  ].join('|'),
+  'iu',
+);
 
 const MAX_LUCKY_SEARCHES = 3;
 const MIN_LUCKY_POPULARITY = 50;
@@ -136,7 +147,7 @@ function isSpoken(speechiness: number | null): boolean {
 async function songsAt(providers: SongProvider[], bpm: number): Promise<TempoSong[]> {
   const results = await Promise.allSettled(providers.map((provider) => provider.songsAt(bpm)));
   const listed = results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
-  const songs = dedupe(listed.filter((song) => song.bpm === bpm));
+  const songs = dedupe(listed.filter((song) => song.bpm === bpm && !NON_SONG_TITLE.test(song.title)));
 
   const failure = results.find((r) => r.status === 'rejected');
   if (songs.length === 0 && failure) {
