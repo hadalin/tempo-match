@@ -97,7 +97,10 @@ form.addEventListener('submit', async (event) => {
   }
 
   setBpm(enteredBpm());
-  await search(`/api/song?bpm=${slider.value}`);
+  const song = await search(`/api/song?bpm=${slider.value}`);
+  if (song && autoplay !== AUTOPLAY_OFF && !autoplayUnavailable) {
+    playback.play();
+  }
 });
 
 autoplayButton.addEventListener('click', () => {

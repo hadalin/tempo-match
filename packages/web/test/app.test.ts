@@ -576,6 +576,38 @@ test('does not play the first song by itself', async () => {
   assert.deepEqual(commands(embed(app.result)), ['load_complete_ack']);
 });
 
+test('does not play the found song with autoplay off', async () => {
+  const app = loadApp(async () => Response.json(SONG));
+  await app.form.dispatch('submit');
+
+  emit(app, { type: 'ready' });
+
+  assert.deepEqual(commands(embed(app.result)), ['load_complete_ack']);
+});
+
+for (const [mode, clicks] of [['same tempo', 1], ['random tempo', 2]] as const) {
+  test(`plays the found song with ${mode} autoplay`, async () => {
+    const fetch = mock.fn(async (_: string) => Response.json(SONG));
+    const app = loadApp(fetch);
+    await cycleTo(app, clicks);
+    await app.form.dispatch('submit');
+
+    emit(app, { type: 'ready' });
+
+    assert.equal(fetch.mock.calls[0].arguments[0], '/api/song?bpm=120');
+    assert.deepEqual(commands(embed(app.result)), ['load_complete_ack', 'play']);
+  });
+}
+
+test('does not play when the search fails with autoplay on', async () => {
+  const message = 'No song found at 120 BPM';
+  const app = loadApp(async () => Response.json({ error: message }, { status: 404 }));
+  await cycleTo(app, 1);
+  await app.form.dispatch('submit');
+
+  assert.equal(app.result.textContent, message);
+});
+
 test('asks for a tap when the browser blocks playing the next song', async () => {
   const app = loadApp(async () => Response.json(SONG));
   await app.form.dispatch('submit');
