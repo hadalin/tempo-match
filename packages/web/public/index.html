@@ -115,10 +115,19 @@
       color: var(--muted);
       font-size: .9rem;
     }
-    #autoplay { display: flex; align-items: center; justify-content: center; gap: 2px; color: var(--muted); }
+    #autoplay { position: relative; display: flex; align-items: center; justify-content: center; color: var(--muted); }
     #autoplay svg { width: 26px; height: 26px; margin: 0; }
-    #autoplay .dice { width: 14px; height: 14px; }
     #autoplay:not([data-mode=off]) { color: var(--outline); }
+    #autoplay:not([data-mode=off])::after {
+      content: '';
+      position: absolute;
+      bottom: 7px;
+      left: calc(50% - 2.5px);
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: currentColor;
+    }
     .tip-anchor { position: relative; flex: none; }
     .tooltip {
       position: absolute;

@@ -119,7 +119,8 @@ function announcements(result: FakeElement): string[] {
 }
 
 function icons(button: FakeElement): (string | null)[] {
-  return (button.children as FakeElement[]).map((icon) => icon.getAttribute('class'));
+  assert.equal(button.children.length, 1);
+  return ((button.children[0] as FakeElement).children as FakeElement[]).map((part) => part.getAttribute('class'));
 }
 
 function commands(frame: FakeElement): unknown[] {
