@@ -312,6 +312,34 @@ test('skips a poetry reading that shares only the artist, then tries the next so
   assert.deepEqual(verifications.map((c) => c.url.searchParams.get('ids')), [VALERIE.id]);
 });
 
+test('stops at the first candidate that matches by ISRC and passes the checks', async () => {
+  const tempo = source([
+    { title: 'Dreams', artist: 'Fleetwood Mac', bpm: 120, isrc: 'USWB10400046' },
+    { title: 'Valerie', artist: 'Amy Winehouse', bpm: 120, isrc: 'GBUM70700001' },
+  ]);
+  const { fetch, calls } = fakeFetch((url) => {
+    if (url.hostname === 'accounts.spotify.com') {
+      return json({ access_token: 'tok', expires_in: 3600 });
+    }
+    if (url.hostname === 'api.spotify.com') {
+      const id = url.searchParams.get('q')!.replace('isrc:', '');
+      return json({ tracks: { items: [{ id, name: 'X', artists: [{ name: 'Y' }], duration_ms: 200_000 }] } });
+    }
+    if (url.hostname === 'api.reccobeats.com') {
+      const id = url.searchParams.get('ids')!;
+      return json({ content: [{ href: `https://open.spotify.com/track/${id}`, tempo: 120, speechiness: 0.05 }] });
+    }
+    return undefined;
+  });
+  const catalog = spotify({ clientId: 'id', clientSecret: 's', market: 'US' }, fetch);
+
+  const song = await createEngine([tempo], catalog, KEEP_ORDER, reccoBeats(fetch)).matchSong(120);
+
+  assert.equal(song.spotifyTrackId, 'USWB10400046');
+  const searches = calls.filter((c) => c.url.pathname === '/v1/search');
+  assert.deepEqual(searches.map((c) => c.url.searchParams.get('q')), ['isrc:USWB10400046']);
+});
+
 for (const bpm of [39, 221, 120.5, Number.NaN]) {
   test(`rejects BPM ${bpm} without calling APIs`, async () => {
     const tempo = source([]);
