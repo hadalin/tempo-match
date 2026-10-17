@@ -1,0 +1,22 @@
+{
+  "name": "tempo-match",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node --watch-path=packages --env-file-if-exists=.env packages/web/src/main.ts",
+    "start": "node --env-file-if-exists=.env packages/web/src/main.ts",
+    "test": "node --test \"packages/*/test/**/*.test.ts\"",
+    "typecheck": "tsc"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2"
+  }
+}

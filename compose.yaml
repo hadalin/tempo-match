@@ -1,0 +1,19 @@
+services:
+  tempo-match:
+    build: .
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8095:3000"
+    environment:
+      GETSONGBPM_API_KEY: ${GETSONGBPM_API_KEY:?}
+      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:?}
+      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:?}
+      SPOTIFY_MARKET: ${SPOTIFY_MARKET:-}
+      DEEZER_ENABLED: ${DEEZER_ENABLED:-}
+      RECCOBEATS_ENABLED: ${RECCOBEATS_ENABLED:-}
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

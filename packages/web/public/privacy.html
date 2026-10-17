@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy · Tempo Match</title>
+  <meta name="description" content="Tempo Match has no accounts, stores no personal data and uses no analytics. What happens when you search.">
+  <meta property="og:site_name" content="Tempo Match">
+  <meta name="twitter:title" content="Privacy · Tempo Match">
+  <meta name="twitter:description" content="Tempo Match has no accounts, stores no personal data and uses no analytics. What happens when you search.">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="stylesheet" href="/theme.css">
+  <style>
+    body {
+      margin: 0;
+      padding: 16px;
+      background: var(--bg);
+      color: var(--fg);
+      font: 16px/1.6 system-ui, sans-serif;
+    }
+    main { max-width: 640px; margin: 0 auto; }
+    h1 { font-size: 1.75rem; }
+    h2 { margin-top: 32px; font-size: 1.15rem; }
+    a { color: inherit; }
+    nav a { display: inline-block; padding: 10px 0; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main>
+    <nav><a href="/">← Tempo Match</a></nav>
+    <h1>Privacy</h1>
+    <p>Tempo Match has no accounts and stores no personal data. It sets no cookies of its own and uses no analytics.</p>
+
+    <h2>What happens when you search</h2>
+    <p>Your browser sends the chosen BPM to the Tempo Match server. The server then asks <a href="https://getsongbpm.com">GetSongBPM</a> and <a href="https://www.deezer.com">Deezer</a> for songs at that tempo and searches <a href="https://www.spotify.com">Spotify</a> for the matching tracks. These requests are made by the server, so GetSongBPM and Deezer receive the tempo and Spotify receives song names and recording codes (ISRCs), not your IP address or browser details. To skip songs listed at the wrong tempo, the server then asks <a href="https://reccobeats.com">ReccoBeats</a> for the tempo of the Spotify track it found, so ReccoBeats receives Spotify track IDs from the server only. The dice button works the same way: the server searches Spotify for a random common word and asks ReccoBeats for the popularity and tempo of the tracks found.</p>
+    <p>To show songs that play where you are, the Spotify search uses your country. Cloudflare, which delivers the site, derives a country code from your IP address and supplies it to the server. Tempo Match sends that code to Spotify with the search and keeps it in the keys of its in-memory lookup cache, which is lost when the server restarts. It does not write the code to persistent storage or tie it to a visitor profile.</p>
+    <p>Tempo Match does not log your searches. Whoever hosts a copy of the app may keep standard server access logs, such as IP addresses, under their own policy.</p>
+
+    <h2>Spotify player</h2>
+    <p>When a song is found, the page shows Spotify's embedded player. It loads directly from Spotify in your browser, so Spotify receives your IP address and browser details and may set its own cookies, including recognising you if you are logged in to Spotify. The "Play on Spotify" button opens the Spotify app. Spotify's handling of that data is covered by the <a href="https://www.spotify.com/legal/privacy-policy/">Spotify Privacy Policy</a>.</p>
+
+    <h2>Contact</h2>
+    <p>Questions about privacy: open an issue at <a href="https://github.com/hadalin/tempo-match/issues">github.com/hadalin/tempo-match/issues</a>.</p>
+  </main>
+</body>
+</html>
