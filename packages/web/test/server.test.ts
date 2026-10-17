@@ -132,6 +132,7 @@ test('loads the page script by its content version', async () => {
   const html = await (await fetch(`${base}/`)).text();
 
   assert.ok(html.includes(`<script src="/app.js?v=${versionOf('app.js')}"></script>`));
+  assert.ok(html.includes(`<script src="/spotify-embed.js?v=${versionOf('spotify-embed.js')}"></script>`));
 });
 
 test('shares the page with an absolute preview image', async () => {
@@ -179,6 +180,7 @@ for (const page of ['/', '/privacy', '/terms']) {
 
 const ASSETS = [
   ['/app.js', 'app.js'],
+  ['/spotify-embed.js', 'spotify-embed.js'],
   ['/theme.css', 'theme.css'],
   ['/favicon.svg', 'favicon.svg'],
   ['/favicon-32.png', 'favicon-32.png'],

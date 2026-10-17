@@ -4,6 +4,14 @@ export interface FakeEvent {
   preventDefault(): void;
 }
 
+export class FakeFrameWindow {
+  messages: unknown[] = [];
+
+  postMessage(message: unknown, targetOrigin: string): void {
+    this.messages.push({ message, targetOrigin });
+  }
+}
+
 export class FakeElement {
   id = '';
   className = '';
@@ -11,6 +19,7 @@ export class FakeElement {
   min = '';
   max = '';
   children: (FakeElement | string)[] = [];
+  contentWindow: FakeFrameWindow | null = null;
   private attributes = new Map<string, string>();
   private text = '';
   private listeners = new Map<string, Listener[]>();
@@ -69,7 +78,13 @@ export function fakeDocument(ids: string[]) {
   return {
     elements,
     getElementById: (id: string) => elements.get(id) ?? null,
-    createElement: () => new FakeElement(),
+    createElement: (tag: string) => {
+      const element = new FakeElement();
+      if (tag === 'iframe') {
+        element.contentWindow = new FakeFrameWindow();
+      }
+      return element;
+    },
     createElementNS: () => new FakeElement(),
   };
 }

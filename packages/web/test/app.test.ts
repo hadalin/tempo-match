@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { afterEach, beforeEach, mock, test } from 'node:test';
-import { fakeDocument, type FakeElement } from './fake-dom.ts';
+import { fakeDocument, type FakeElement, type FakeFrameWindow } from './fake-dom.ts';
 
+const EMBED_SOURCE = await readFile(new URL('../public/spotify-embed.js', import.meta.url), 'utf8');
 const APP_SOURCE = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
 const IDS = ['form', 'bpm', 'value', 'submit', 'lucky', 'result', 'down', 'up'];
 const NOW = Date.UTC(2026, 9, 17, 12);
@@ -17,21 +18,75 @@ const IPHONE = { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS
 const IPAD = { userAgent: 'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1', platform: 'iPad', maxTouchPoints: 5 };
 const IPAD_DESKTOP_MODE = { ...DESKTOP_MAC, maxTouchPoints: 5 };
 const CLOUDFLARE_PAGE = '<!DOCTYPE html><title>Rate limited</title>';
+const SPOTIFY = 'https://open.spotify.com';
+const PREVIEW_MS = 29713;
+const FULL_TRACK_MS = 215000;
+const READY_TIMEOUT_MS = 10000;
+const PLAY_TIMEOUT_MS = 5000;
 
 function tooMany(headers: Record<string, string> = {}): Response {
   return new Response(CLOUDFLARE_PAGE, { status: 429, headers: { 'Content-Type': 'text/html', ...headers } });
 }
 
 type FakeNavigator = typeof DESKTOP_MAC;
+type MessageListener = (event: { origin: string; source: unknown; data: unknown }) => void;
 
-function loadApp(fetch: (url: string) => Promise<Response>, search = '', navigator: FakeNavigator = DESKTOP_MAC) {
+class FakeWindow {
+  private listeners = new Set<MessageListener>();
+
+  addEventListener(_: string, listener: MessageListener): void {
+    this.listeners.add(listener);
+  }
+
+  removeEventListener(_: string, listener: MessageListener): void {
+    this.listeners.delete(listener);
+  }
+
+  message(source: unknown, data: unknown, origin = SPOTIFY): void {
+    for (const listener of [...this.listeners]) {
+      listener({ origin, source, data });
+    }
+  }
+}
+
+class MemoryStorage {
+  items = new Map<string, string>();
+
+  getItem(key: string): string | null {
+    return this.items.get(key) ?? null;
+  }
+
+  setItem(key: string, value: string): void {
+    this.items.set(key, value);
+  }
+}
+
+const BLOCKED_STORAGE = {
+  getItem(): never {
+    throw new DOMException('denied', 'SecurityError');
+  },
+  setItem(): never {
+    throw new DOMException('denied', 'SecurityError');
+  },
+};
+
+function loadApp(
+  fetch: (url: string) => Promise<Response>,
+  search = '',
+  navigator: FakeNavigator = DESKTOP_MAC,
+  localStorage: MemoryStorage | typeof BLOCKED_STORAGE = new MemoryStorage(),
+) {
   const document = fakeDocument(IDS);
   const element = (id: string) => document.elements.get(id) as FakeElement;
   Object.assign(element('bpm'), { min: '40', max: '220', value: '120' });
   element('value').value = '120';
   element('form').className = 'loading';
-  new Function('document', 'fetch', 'location', 'navigator', APP_SOURCE)(document, fetch, { search }, navigator);
+  const window = new FakeWindow();
+  new Function('document', 'fetch', 'location', 'navigator', 'window', 'localStorage', `${EMBED_SOURCE}\n${APP_SOURCE}`)(
+    document, fetch, { search }, navigator, window, localStorage,
+  );
   return {
+    window,
     form: element('form'),
     submit: element('submit'),
     lucky: element('lucky'),
@@ -39,6 +94,54 @@ function loadApp(fetch: (url: string) => Promise<Response>, search = '', navigat
     slider: element('bpm'),
     value: element('value'),
   };
+}
+
+function card(result: FakeElement): FakeElement {
+  return result.children[0] as FakeElement;
+}
+
+function embed(result: FakeElement): FakeElement {
+  return card(result).children[2] as FakeElement;
+}
+
+function autoplaySlot(result: FakeElement): FakeElement {
+  return card(result).children.at(-1) as FakeElement;
+}
+
+function autoplayButton(result: FakeElement): FakeElement {
+  return autoplaySlot(result).children[0] as FakeElement;
+}
+
+function commands(frame: FakeElement): unknown[] {
+  return (frame.contentWindow as FakeFrameWindow).messages.map((sent) => (sent as { message: { command: string } }).message.command);
+}
+
+function playbackUpdate(position: number, { isPaused = false, duration = PREVIEW_MS } = {}) {
+  return { type: 'playback_update', payload: { isPaused, isBuffering: false, duration, position, playingURI: 'spotify:track:1' } };
+}
+
+function emit(app: ReturnType<typeof loadApp>, ...messages: unknown[]): void {
+  const frame = embed(app.result);
+  for (const message of messages) {
+    app.window.message(frame.contentWindow, message);
+  }
+}
+
+function playOut(app: ReturnType<typeof loadApp>, duration = PREVIEW_MS): void {
+  emit(app, { type: 'ready' }, playbackUpdate(duration - 2100, { duration }), playbackUpdate(duration - 1050, { duration }),
+    playbackUpdate(duration, { duration }), playbackUpdate(duration, { duration }));
+}
+
+async function settle(): Promise<void> {
+  for (let turn = 0; turn < 10; turn++) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+async function cycleTo(app: ReturnType<typeof loadApp>, clicks: number): Promise<void> {
+  for (let click = 0; click < clicks; click++) {
+    await autoplayButton(app.result).dispatch('click');
+  }
 }
 
 function previewHint(result: FakeElement): FakeElement | undefined {
@@ -52,7 +155,7 @@ function visibleNotice(result: FakeElement): string {
 }
 
 beforeEach(() => {
-  mock.timers.enable({ apis: ['setInterval', 'Date'], now: NOW });
+  mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'], now: NOW });
   mock.method(Math, 'random', () => RANDOM_FOR_120);
 });
 
@@ -299,3 +402,316 @@ for (const [device, navigator] of [['desktop Safari', DESKTOP_MAC], ['desktop Ch
     assert.equal(previewHint(app.result), undefined);
   });
 }
+
+const AUTOPLAY_STATES = [
+  ['Autoplay off', 'Autoplay: off. Click to autoplay same tempo', 'Autoplay off'],
+  ['Autoplay', 'Autoplay: same tempo. Click to autoplay random tempo', 'Autoplay same tempo'],
+  ['Autoplay random', 'Autoplay: random tempo. Click to turn autoplay off', 'Autoplay random tempo'],
+] as const;
+
+test('starts with autoplay off', async () => {
+  const app = loadApp(async () => Response.json(SONG));
+
+  await app.form.dispatch('submit');
+
+  const button = autoplayButton(app.result);
+  assert.equal(button.textContent, 'Autoplay off');
+  assert.equal(button.getAttribute('aria-label'), 'Autoplay: off. Click to autoplay same tempo');
+});
+
+test('cycles autoplay off, same tempo, random tempo, and back off, announcing each', async () => {
+  const app = loadApp(async () => Response.json(SONG));
+  await app.form.dispatch('submit');
+
+  for (const [label, ariaLabel, announced] of [...AUTOPLAY_STATES.slice(1), AUTOPLAY_STATES[0]]) {
+    await cycleTo(app, 1);
+
+    const button = autoplayButton(app.result);
+    assert.equal(button.textContent, label);
+    assert.equal(button.getAttribute('aria-label'), ariaLabel);
+    assert.equal((autoplaySlot(app.result).children[1] as FakeElement).textContent, announced);
+  }
+});
+
+for (const [clicks, [label]] of AUTOPLAY_STATES.entries()) {
+  test(`remembers ${label.toLowerCase()} across page loads`, async () => {
+    const storage = new MemoryStorage();
+    const first = loadApp(async () => Response.json(SONG), '', DESKTOP_MAC, storage);
+    await first.form.dispatch('submit');
+    await cycleTo(first, clicks);
+
+    const second = loadApp(async () => Response.json(SONG), '', DESKTOP_MAC, storage);
+    await second.form.dispatch('submit');
+
+    assert.equal(autoplayButton(second.result).textContent, label);
+  });
+}
+
+test('ignores an unknown saved autoplay mode', async () => {
+  const storage = new MemoryStorage();
+  storage.setItem('autoplay', 'shuffle');
+  const app = loadApp(async () => Response.json(SONG), '', DESKTOP_MAC, storage);
+
+  await app.form.dispatch('submit');
+
+  assert.equal(autoplayButton(app.result).textContent, 'Autoplay off');
+});
+
+test('cycles autoplay when storage is blocked', async () => {
+  const app = loadApp(async () => Response.json(SONG), '', DESKTOP_MAC, BLOCKED_STORAGE);
+  await app.form.dispatch('submit');
+
+  await cycleTo(app, 1);
+
+  assert.equal(autoplayButton(app.result).textContent, 'Autoplay');
+});
+
+test('does nothing when a song ends with autoplay off', async () => {
+  const fetch = mock.fn(async (_: string) => Response.json(SONG));
+  const app = loadApp(fetch);
+  await app.form.dispatch('submit');
+
+  playOut(app);
+  await settle();
+
+  assert.equal(fetch.mock.callCount(), 1);
+});
+
+for (const [kind, duration] of [['preview', PREVIEW_MS], ['full track', FULL_TRACK_MS]] as const) {
+  test(`fetches exactly one next song when a ${kind} plays out`, async () => {
+    const fetch = mock.fn(async (_: string) => Response.json(SONG));
+    const app = loadApp(fetch);
+    await app.form.dispatch('submit');
+    await cycleTo(app, 1);
+
+    playOut(app, duration);
+    await settle();
+
+    assert.equal(fetch.mock.callCount(), 2);
+    assert.equal(fetch.mock.calls[1].arguments[0], '/api/song?bpm=120');
+  });
+}
+
+test('does not advance when the song is paused midway', async () => {
+  const fetch = mock.fn(async (_: string) => Response.json(SONG));
+  const app = loadApp(fetch);
+  await app.form.dispatch('submit');
+  await cycleTo(app, 1);
+
+  emit(app, { type: 'ready' }, playbackUpdate(10000), playbackUpdate(11050), playbackUpdate(11200, { isPaused: true }));
+  await settle();
+
+  assert.equal(fetch.mock.callCount(), 1);
+});
+
+test('does not advance when the song is seeked to its end', async () => {
+  const fetch = mock.fn(async (_: string) => Response.json(SONG));
+  const app = loadApp(fetch);
+  await app.form.dispatch('submit');
+  await cycleTo(app, 1);
+
+  emit(app, { type: 'ready' }, playbackUpdate(8411), playbackUpdate(PREVIEW_MS), playbackUpdate(PREVIEW_MS), playbackUpdate(PREVIEW_MS));
+  await settle();
+
+  assert.equal(fetch.mock.callCount(), 1);
+});
+
+test('advances when a song seeked near its end plays out', async () => {
+  const fetch = mock.fn(async (_: string) => Response.json(SONG));
+  const app = loadApp(fetch);
+  await app.form.dispatch('submit');
+  await cycleTo(app, 1);
+
+  emit(app, { type: 'ready' }, playbackUpdate(5000), playbackUpdate(PREVIEW_MS - 900), playbackUpdate(PREVIEW_MS));
+  await settle();
+
+  assert.equal(fetch.mock.callCount(), 2);
+});
+
+test('advances when a song paused near its end is resumed and plays out', async () => {
+  const fetch = mock.fn(async (_: string) => Response.json(SONG));
+  const app = loadApp(fetch);
+  await app.form.dispatch('submit');
+  await cycleTo(app, 1);
+
+  emit(app, { type: 'ready' }, playbackUpdate(PREVIEW_MS - 1200), playbackUpdate(PREVIEW_MS - 1000, { isPaused: true }),
+    playbackUpdate(PREVIEW_MS - 1000), playbackUpdate(PREVIEW_MS));
+  await settle();
+
+  assert.equal(fetch.mock.callCount(), 2);
+});
+
+test('rolls the dice when a song ends with random-tempo autoplay', async () => {
+  const fetch = mock.fn(async (url: string) => Response.json(url.includes('lucky') ? LUCKY_SONG : SONG));
+  const app = loadApp(fetch);
+  await app.form.dispatch('submit');
+  await cycleTo(app, 2);
+
+  playOut(app);
+  await settle();
+
+  assert.equal(fetch.mock.calls[1].arguments[0], '/api/song?lucky=1&exclude=120');
+  assert.equal(String(app.slider.value), '97');
+  assert.match(card(app.result).textContent, /Lucky.*Artist · 97 BPM/);
+});
+
+test('plays the next song once its embed is ready', async () => {
+  const app = loadApp(async () => Response.json(SONG));
+  await app.form.dispatch('submit');
+  await cycleTo(app, 1);
+  const first = embed(app.result);
+
+  playOut(app);
+  await settle();
+  const next = embed(app.result);
+  assert.notEqual(next, first);
+  assert.deepEqual(commands(next), []);
+  emit(app, { type: 'ready' });
+
+  assert.deepEqual(commands(next), ['load_complete_ack', 'play']);
+  assert.equal((next.contentWindow as FakeFrameWindow).messages.every((sent) => (sent as { targetOrigin: string }).targetOrigin === SPOTIFY), true);
+});
+
+test('does not play the first song by itself', async () => {
+  const app = loadApp(async () => Response.json(SONG));
+  await app.form.dispatch('submit');
+  await cycleTo(app, 1);
+
+  emit(app, { type: 'ready' });
+
+  assert.deepEqual(commands(embed(app.result)), ['load_complete_ack']);
+});
+
+test('asks for a tap when the browser blocks playing the next song', async () => {
+  const app = loadApp(async () => Response.json(SONG));
+  await app.form.dispatch('submit');
+  await cycleTo(app, 1);
+  playOut(app);
+  await settle();
+
+  emit(app, { type: 'ready' }, playbackUpdate(0, { isPaused: true }));
+  mock.timers.tick(PLAY_TIMEOUT_MS);
+
+  assert.equal((autoplaySlot(app.result).children.at(-1) as FakeElement).textContent, 'Tap play to start the next song');
+});
+
+test('shows no tap hint when the next song starts playing', async () => {
+  const app = loadApp(async () => Response.json(SONG));
+  await app.form.dispatch('submit');
+  await cycleTo(app, 1);
+  playOut(app);
+  await settle();
+
+  emit(app, { type: 'ready' }, playbackUpdate(0));
+  mock.timers.tick(PLAY_TIMEOUT_MS);
+
+  assert.doesNotMatch(card(app.result).textContent, /Tap play/);
+});
+
+test('stops autoplay with the countdown when the next song is rate limited', async () => {
+  let calls = 0;
+  const fetch = mock.fn(async (_: string) => (calls++ === 0 ? Response.json(SONG) : tooMany({ 'Retry-After': '8' })));
+  const app = loadApp(fetch);
+  await app.form.dispatch('submit');
+  await cycleTo(app, 1);
+  const first = embed(app.result).contentWindow;
+
+  playOut(app);
+  await settle();
+  app.window.message(first, playbackUpdate(PREVIEW_MS - 1000));
+  app.window.message(first, playbackUpdate(PREVIEW_MS));
+  await settle();
+
+  assert.equal(visibleNotice(app.result), 'Too many searches, try again in 8 s');
+  assert.equal(fetch.mock.callCount(), 2);
+});
+
+test('stops autoplay with the message when the next song fails', async () => {
+  const message = 'No song found at 120 BPM';
+  let calls = 0;
+  const fetch = mock.fn(async (_: string) => (calls++ === 0 ? Response.json(SONG) : Response.json({ error: message }, { status: 404 })));
+  const app = loadApp(fetch);
+  await app.form.dispatch('submit');
+  await cycleTo(app, 1);
+
+  playOut(app);
+  await settle();
+
+  assert.equal(app.result.textContent, message);
+  assert.equal(fetch.mock.callCount(), 2);
+});
+
+test('ignores embed messages from another origin', async () => {
+  const fetch = mock.fn(async (_: string) => Response.json(SONG));
+  const app = loadApp(fetch);
+  await app.form.dispatch('submit');
+  await cycleTo(app, 1);
+  const frame = embed(app.result).contentWindow;
+
+  for (const update of [playbackUpdate(PREVIEW_MS - 1000), playbackUpdate(PREVIEW_MS)]) {
+    app.window.message(frame, update, 'https://evil.example');
+  }
+  await settle();
+
+  assert.equal(fetch.mock.callCount(), 1);
+});
+
+test('ignores embed messages from another frame', async () => {
+  const fetch = mock.fn(async (_: string) => Response.json(SONG));
+  const app = loadApp(fetch);
+  await app.form.dispatch('submit');
+  await cycleTo(app, 1);
+
+  for (const update of [playbackUpdate(PREVIEW_MS - 1000), playbackUpdate(PREVIEW_MS)]) {
+    app.window.message({}, update);
+  }
+  await settle();
+
+  assert.equal(fetch.mock.callCount(), 1);
+});
+
+test('turns autoplay off quietly when playback updates have an unknown shape', async () => {
+  const fetch = mock.fn(async (_: string) => Response.json(SONG));
+  const app = loadApp(fetch);
+  await app.form.dispatch('submit');
+  await cycleTo(app, 1);
+
+  emit(app, { type: 'ready' }, { type: 'playback_update', payload: { paused: false, progress: 1 } });
+  playOut(app);
+  await settle();
+
+  assert.equal(autoplaySlot(app.result).textContent, 'Autoplay unavailable right now');
+  assert.equal(fetch.mock.callCount(), 1);
+});
+
+test('turns autoplay off quietly when the embed never says it is ready', async () => {
+  const app = loadApp(async () => Response.json(SONG));
+  await app.form.dispatch('submit');
+
+  await embed(app.result).dispatch('load');
+  mock.timers.tick(READY_TIMEOUT_MS);
+
+  assert.equal(autoplaySlot(app.result).textContent, 'Autoplay unavailable right now');
+});
+
+test('keeps autoplay unavailable for later songs', async () => {
+  const app = loadApp(async () => Response.json(SONG));
+  await app.form.dispatch('submit');
+  emit(app, { type: 'playback_update', payload: null });
+
+  await app.form.dispatch('submit');
+
+  assert.equal(autoplaySlot(app.result).textContent, 'Autoplay unavailable right now');
+  assert.match(card(app.result).textContent, /Song.*Play on Spotify/);
+});
+
+test('waits for the embed ready message after it loads', async () => {
+  const app = loadApp(async () => Response.json(SONG));
+  await app.form.dispatch('submit');
+
+  await embed(app.result).dispatch('load');
+  emit(app, { type: 'ready' });
+  mock.timers.tick(READY_TIMEOUT_MS);
+
+  assert.equal(autoplayButton(app.result).textContent, 'Autoplay off');
+});

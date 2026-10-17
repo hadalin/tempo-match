@@ -113,6 +113,23 @@
       color: var(--muted);
       font-size: .9rem;
     }
+    .autoplay {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 44px;
+      margin: 0 auto;
+      padding: 8px 16px;
+      background: none;
+      color: var(--muted);
+      font-size: .9rem;
+    }
+    .autoplay svg { width: 20px; height: 20px; flex: none; }
+    .autoplay .dice { width: 14px; height: 14px; margin-left: -4px; }
+    .autoplay:not([data-mode=off]) { color: var(--fg); }
+    .autoplay:not([data-mode=off]) svg { color: var(--outline); }
+    .autoplay:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+    .card .autoplay-note { margin: 4px 0 0; font-size: .85rem; text-align: center; }
     .error { color: var(--error); }
     .visually-hidden {
       position: absolute;
@@ -159,6 +176,7 @@
       <nav aria-label="Site"><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="https://github.com/hadalin/tempo-match">Source (MIT)</a></nav>
     </footer>
   </main>
+  <script src="/spotify-embed.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

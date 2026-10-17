@@ -26,6 +26,7 @@ const RATE_LIMITED_PAGE = '<!doctype html><title>Too many requests</title><h1>To
 const ASSETS = new Map(
   [
     ['/app.js', 'app.js', JAVASCRIPT],
+    ['/spotify-embed.js', 'spotify-embed.js', JAVASCRIPT],
     ['/theme.css', 'theme.css', CSS],
     ['/favicon.svg', 'favicon.svg', SVG],
     ['/favicon-32.png', 'favicon-32.png', PNG],
