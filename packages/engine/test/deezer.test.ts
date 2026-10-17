@@ -190,7 +190,11 @@ test('throws UpstreamError on an error payload', async () => {
 test('a Deezer failure does not fail the request', async () => {
   const { fetch } = fakeFetch(() => json({}, 503));
   const other = { songsAt: async () => [{ title: 'Found', artist: 'A', bpm: 120 }] };
-  const catalog: TrackCatalog = { findTrackId: async () => 'f', searchTracks: async () => [] };
+  const catalog: TrackCatalog = {
+    market: 'US',
+    findTrackId: async () => 'f',
+    searchTracks: async () => [],
+  };
 
   const song = await createEngine([deezer(fetch), other], catalog).matchSong(120);
 

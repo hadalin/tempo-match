@@ -43,6 +43,7 @@ function catalog(
   const lookups: string[] = [];
   const markets: (string | undefined)[] = [];
   return {
+    market: 'US',
     lookups,
     markets,
     async findTrackId({ title }, market) {
@@ -163,6 +164,7 @@ test('treats songs with the same ISRC as one song', async () => {
 test('passes the ISRC to the catalog and leaves it out of the match', async () => {
   const isrcs: (string | undefined)[] = [];
   const spotify: TrackCatalog = {
+    market: 'US',
     async findTrackId({ isrc }) {
       isrcs.push(isrc);
       return 'd';
@@ -180,6 +182,7 @@ test('passes the ISRC to the catalog and leaves it out of the match', async () =
 test('keeps the ISRC of a later listing of the same song', async () => {
   const queries: TrackQuery[] = [];
   const spotify: TrackCatalog = {
+    market: 'US',
     async findTrackId({ title, artist, isrc }) {
       queries.push({ title, artist, isrc });
       return 's';
@@ -360,7 +363,12 @@ test('engineFromEnv names every missing variable', () => {
   );
 });
 
-const ENV = { GETSONGBPM_API_KEY: 'k', SPOTIFY_CLIENT_ID: 'id', SPOTIFY_CLIENT_SECRET: 's' };
+const ENV = {
+  GETSONGBPM_API_KEY: 'k',
+  SPOTIFY_CLIENT_ID: 'id',
+  SPOTIFY_CLIENT_SECRET: 's',
+  SONG_STORE_PATH: ':memory:',
+};
 
 async function requestedHosts(env: Record<string, string>, t: TestContext): Promise<string[]> {
   const hosts: string[] = [];

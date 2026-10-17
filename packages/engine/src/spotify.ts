@@ -40,6 +40,8 @@ export interface CatalogTrack {
 }
 
 export interface TrackCatalog {
+  /** The market of calls that pass none. */
+  market: string;
   /**
    * Looks the ISRC up first when it is valid, then searches by title and artist.
    * Tracks too short to be songs are never returned.
@@ -181,6 +183,7 @@ export function spotify(
   }
 
   return {
+    market: creds.market,
     async findTrackId({ title, artist, isrc }, market = creds.market) {
       if (isrc && ISRC_PATTERN.test(isrc)) {
         const track = await cachedIsrcs(JSON.stringify([market, isrc]), () =>

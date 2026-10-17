@@ -55,6 +55,7 @@ function songsAt(bpm: number, count = 1): SongProvider {
 function catalog(): TrackCatalog & { lookups: string[] } {
   const lookups: string[] = [];
   return {
+    market: 'US',
     lookups,
     async findTrackId({ title }) {
       lookups.push(title);
@@ -345,7 +346,11 @@ test('keeps matching songs without ReccoBeats while backing off', async () => {
 test('reports lucky picks as unavailable while backing off', async () => {
   const { fetch, calls } = fakeFetch(rateLimited('60'));
   const page: CatalogTrack[] = [{ spotifyTrackId: TRACK_ID, title: 'T', artist: 'A' }];
-  const spotify: TrackCatalog = { findTrackId: async () => null, searchTracks: async () => page };
+  const spotify: TrackCatalog = {
+    market: 'US',
+    findTrackId: async () => null,
+    searchTracks: async () => page,
+  };
   const engine = createEngine([], spotify, KEEP_ORDER, reccoBeats(fetch, () => 0));
 
   await assert.rejects(engine.luckySong(), UpstreamError);

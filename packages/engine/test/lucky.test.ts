@@ -27,6 +27,7 @@ function track(id: string): CatalogTrack {
 function catalog(pages: CatalogTrack[][]): TrackCatalog & { searches: Search[] } {
   const searches: Search[] = [];
   return {
+    market: 'US',
     searches,
     findTrackId: async () => null,
     async searchTracks(term, offset, market) {
@@ -174,6 +175,7 @@ const ENV = {
   SPOTIFY_CLIENT_ID: 'id',
   SPOTIFY_CLIENT_SECRET: 's',
   SPOTIFY_MARKET: 'DE',
+  SONG_STORE_PATH: ':memory:',
 };
 const SPOTIFY_ID = '3JvKfv6T31zO0ini8iNItO';
 

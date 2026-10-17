@@ -26,6 +26,9 @@ Requires Node.js 24+. Copy `.env.example` to `.env` and fill in:
 Optional: `SPOTIFY_MARKET` (default `US`), `PORT` (default `3000`), `DEEZER_ENABLED=false`,
 `RECCOBEATS_ENABLED=false` (skips the [ReccoBeats](https://reccobeats.com) tempo check and turns off autoplay random).
 
+Searched songs are kept in SQLite at `SONG_STORE_PATH` (default `songs.db`; in memory if it cannot be opened), so they
+need no Spotify search after a restart: Spotify track ids for 30 days, misses for 14, no Spotify names or images.
+
 ```sh
 npm install
 npm start          # http://localhost:3000
@@ -52,6 +55,8 @@ variables above as Portainer stack environment variables (Git repository stack, 
 ```sh
 docker compose up -d --build
 ```
+
+The song store lives in the `songs` volume at `/data/songs.db`.
 
 ## License
 
