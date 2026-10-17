@@ -1,8 +1,9 @@
+import { tokenBucket } from './budget.ts';
 import { DAY_MS, ttlCache } from './cache.ts';
-import { UpstreamError } from './errors.ts';
+import { BusyError, UpstreamError } from './errors.ts';
 import { normalize, normalizeTitle } from './normalize.ts';
 import type { TempoSong } from './provider.ts';
-import { fetchUpstream } from './upstream.ts';
+import { fetchUpstream, retryAfterMs, SECOND_MS } from './upstream.ts';
 
 const TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const SEARCH_URL = 'https://api.spotify.com/v1/search';
@@ -15,6 +16,14 @@ const MAX_CACHED_TRACKS = 10_000;
 const MAX_CACHED_PAGES = 1024;
 const ISRC_PATTERN = /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/;
 const MIN_DURATION_MS = 90_000;
+const SERVICE = 'Spotify';
+const HTTP_TOO_MANY_REQUESTS = 429;
+const BACK_OFF_MS = 30 * SECOND_MS;
+// Spotify asked for 50,985 s once; a larger value is more likely a bad header than a longer ban.
+const MAX_BACK_OFF_MS = DAY_MS;
+// About 300 searches in 2.5 minutes got the app blocked for 14 hours.
+const MAX_CALLS_PER_MINUTE = 30;
+const MAX_BURST_CALLS = 10;
 
 export interface SpotifyCredentials {
   clientId: string;
@@ -62,6 +71,25 @@ export function spotify(
   const cached = ttlCache<string | null>(DAY_MS, MAX_CACHED_TRACKS, now);
   const cachedIsrcs = ttlCache<SearchTrack | null>(DAY_MS, MAX_CACHED_TRACKS, now);
   const cachedPages = ttlCache<CatalogTrack[]>(DAY_MS, MAX_CACHED_PAGES, now);
+  const budget = tokenBucket(MAX_CALLS_PER_MINUTE, MAX_BURST_CALLS, now);
+  let blockedUntil = -Infinity;
+
+  /** Like fetchUpstream, but sends nothing while Spotify blocks the app or the budget is spent. */
+  async function call(service: string, input: string | URL, init: RequestInit): Promise<Response> {
+    if (now() < blockedUntil || !budget()) {
+      throw new BusyError(SERVICE);
+    }
+
+    const res = await fetchUpstream(service, fetchFn, input, init);
+    if (res.status !== HTTP_TOO_MANY_REQUESTS) {
+      return res;
+    }
+
+    const waitMs = retryAfterMs(res.headers.get('Retry-After'), now(), BACK_OFF_MS, MAX_BACK_OFF_MS);
+    blockedUntil = now() + waitMs;
+    console.error(`${service} answered HTTP 429, pausing Spotify calls for ${waitMs / SECOND_MS} s`);
+    throw new BusyError(SERVICE);
+  }
 
   async function accessToken(): Promise<string> {
     if (token && now() < token.expiresAt) {
@@ -77,7 +105,7 @@ export function spotify(
 
   async function requestToken(): Promise<Token> {
     const basic = Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString('base64');
-    const res = await fetchUpstream('Spotify token', fetchFn, TOKEN_URL, {
+    const res = await call('Spotify token', TOKEN_URL, {
       method: 'POST',
       headers: {
         Authorization: `Basic ${basic}`,
@@ -110,7 +138,7 @@ export function spotify(
     url.searchParams.set('limit', String(limit));
     url.searchParams.set('offset', String(offset));
 
-    const res = await fetchUpstream('Spotify search', fetchFn, url, {
+    const res = await call('Spotify search', url, {
       headers: { Authorization: `Bearer ${await accessToken()}` },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });

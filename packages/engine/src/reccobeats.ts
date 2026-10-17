@@ -1,6 +1,6 @@
 import { type Cached, DAY_MS, ttlCache } from './cache.ts';
 import { UpstreamError } from './errors.ts';
-import { fetchUpstream } from './upstream.ts';
+import { fetchUpstream, retryAfterMs, SECOND_MS } from './upstream.ts';
 import type { TempoVerifier, TrackFeatures } from './verifier.ts';
 
 const AUDIO_FEATURES_URL = 'https://api.reccobeats.com/v1/audio-features';
@@ -10,10 +10,8 @@ const CACHE_TTL_MS = 30 * DAY_MS;
 const MAX_CACHED_FEATURES = 10_000;
 const MAX_CACHED_POPULARITIES = 10_000;
 const SERVICE = 'ReccoBeats';
-const SECOND_MS = 1000;
 const BACK_OFF_MS = 30 * SECOND_MS;
 const MAX_BACK_OFF_MS = 120 * SECOND_MS;
-const DELTA_SECONDS = /^\d+$/;
 
 interface Row {
   href?: string;
@@ -46,15 +44,6 @@ export function reccoBeats(
     return error;
   }
 
-  function retryAfterMs(header: string | null): number {
-    const value = header?.trim() ?? '';
-    const ms = DELTA_SECONDS.test(value) ? Number(value) * SECOND_MS : Date.parse(value) - now();
-    if (Number.isNaN(ms)) {
-      return BACK_OFF_MS;
-    }
-    return Math.min(Math.max(ms, 0), MAX_BACK_OFF_MS);
-  }
-
   async function fetchRows<R extends Row>(
     endpoint: string,
     ids: string[],
@@ -74,7 +63,8 @@ export function reccoBeats(
     });
     if (!res.ok) {
       const error = new UpstreamError(SERVICE, res.status);
-      throw startBackOff(error, retryAfterMs(res.headers.get('Retry-After')));
+      const retryAfter = res.headers.get('Retry-After');
+      throw startBackOff(error, retryAfterMs(retryAfter, now(), BACK_OFF_MS, MAX_BACK_OFF_MS));
     }
 
     // Rows carry no Spotify id field and unknown ids are left out, so rows are matched by link.

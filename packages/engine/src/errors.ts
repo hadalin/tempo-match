@@ -23,6 +23,14 @@ export class UpstreamError extends Error {
   }
 }
 
+/** Thrown instead of calling a service that rate-limited us, or whose call budget is spent. */
+export class BusyError extends Error {
+  constructor(service: string) {
+    super(`${service} is busy, try again later`);
+    this.name = 'BusyError';
+  }
+}
+
 export class MissingConfigError extends Error {
   constructor(names: string[]) {
     super(`Missing environment variables: ${names.join(', ')}`);

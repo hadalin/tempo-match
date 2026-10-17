@@ -2,6 +2,7 @@ export { createEngine, MAX_BPM, MIN_BPM, type MatchedSong, type TempoEngine } fr
 export { engineFromEnv, type Env } from './config.ts';
 export { deezer } from './deezer.ts';
 export {
+  BusyError,
   InvalidBpmError,
   LuckyDisabledError,
   MissingConfigError,

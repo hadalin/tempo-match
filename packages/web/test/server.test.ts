@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { connect, type AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
 import {
+  BusyError,
   InvalidBpmError,
   LuckyDisabledError,
   NoLuckyPickError,
@@ -31,6 +32,9 @@ const engine: TempoEngine = {
     }
     if (bpm === 99) {
       throw new UpstreamError('Spotify search', 503);
+    }
+    if (bpm === 98) {
+      throw new BusyError('Spotify');
     }
     throw new InvalidBpmError(bpm, 40, 220);
   },
@@ -269,6 +273,7 @@ for (const [bpm, status] of [
   ['abc', 400],
   ['41', 404],
   ['99', 502],
+  ['98', 503],
   ['120.0', 400],
   ['0x78', 400],
   ['1e2', 400],
@@ -345,6 +350,7 @@ for (const [label, error, status, message] of [
     502,
     'A music service is unavailable, try again later',
   ],
+  ['finds Spotify busy', new BusyError('Spotify'), 503, 'Spotify is busy, try again later'],
 ] as const) {
   test(`answers HTTP ${status} when lucky ${label}`, async () => {
     luck = error;

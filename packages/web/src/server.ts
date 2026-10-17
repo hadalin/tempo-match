@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import {
+  BusyError,
   InvalidBpmError,
   LuckyDisabledError,
   MAX_BPM,
@@ -159,7 +160,7 @@ async function sendSong(song: Promise<MatchedSong>, res: ServerResponse): Promis
     sendJson(res, HTTP_OK, await song);
   } catch (err) {
     const { status, message } = errorResponse(err);
-    if (status >= HTTP_INTERNAL_ERROR) {
+    if (status >= HTTP_INTERNAL_ERROR && !(err instanceof BusyError)) {
       console.error(err);
     }
     sendJson(res, status, { error: message });
@@ -173,7 +174,7 @@ function errorResponse(err: unknown): { status: number; message: string } {
   if (err instanceof NoMatchError || err instanceof NoLuckyPickError) {
     return { status: HTTP_NOT_FOUND, message: err.message };
   }
-  if (err instanceof LuckyDisabledError) {
+  if (err instanceof LuckyDisabledError || err instanceof BusyError) {
     return { status: HTTP_SERVICE_UNAVAILABLE, message: err.message };
   }
   if (err instanceof UpstreamError) {

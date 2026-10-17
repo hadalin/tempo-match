@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
-import { spotify, UpstreamError } from '../src/index.ts';
+import { test, type TestContext } from 'node:test';
+import { BusyError, spotify, UpstreamError } from '../src/index.ts';
 import { fakeFetch, json, type Call, type Route } from './fake-fetch.ts';
 
 const CREDS = { clientId: 'id', clientSecret: 'secret', market: 'US' };
@@ -329,4 +329,85 @@ test('caches search pages per market, term and offset', async () => {
   await catalog.searchTracks('love', 0, 'SI');
 
   assert.equal(searchRequests(calls).length, 4);
+});
+
+const SECOND_MS = 1000;
+const DAY_MS = 24 * 3600 * SECOND_MS;
+
+function rateLimitedOnce(host: string, headers: Record<string, string>): Route {
+  let limited = false;
+  return (url, init) => {
+    if (url.hostname === host && !limited) {
+      limited = true;
+      return new Response(null, { status: 429, headers });
+    }
+    return routes([track('Eagles', '1', 'Hotel California')])(url, init);
+  };
+}
+
+function quietErrors(t: TestContext) {
+  return t.mock.method(console, 'error', () => {});
+}
+
+for (const [host, label] of [
+  ['api.spotify.com', 'a search'],
+  ['accounts.spotify.com', 'a token request'],
+] as const) {
+  test(`sends nothing to Spotify for the Retry-After after ${label} gets HTTP 429`, async (t) => {
+    const errors = quietErrors(t);
+    const { fetch, calls } = fakeFetch(rateLimitedOnce(host, { 'Retry-After': '50985' }));
+    let clock = 0;
+    const catalog = spotify(CREDS, fetch, () => clock);
+    const hotel = { title: 'Hotel California', artist: 'Eagles' };
+
+    await assert.rejects(catalog.findTrackId(hotel), BusyError);
+    const sent = calls.length;
+    clock = 50_984 * SECOND_MS;
+    await assert.rejects(catalog.findTrackId(hotel), BusyError);
+    await assert.rejects(catalog.searchTracks('love', 0), BusyError);
+    assert.equal(calls.length, sent);
+
+    clock = 50_985 * SECOND_MS;
+    assert.equal(await catalog.findTrackId(hotel), '1');
+    assert.equal(errors.mock.callCount(), 1);
+  });
+}
+
+for (const [label, headers, waitMs] of [
+  ['without Retry-After', {}, 30 * SECOND_MS],
+  ['for at most a day', { 'Retry-After': String((10 * DAY_MS) / SECOND_MS) }, DAY_MS],
+] as const) {
+  test(`backs off from Spotify ${label}`, async (t) => {
+    quietErrors(t);
+    const { fetch, calls } = fakeFetch(rateLimitedOnce('api.spotify.com', headers));
+    let clock = 0;
+    const catalog = spotify(CREDS, fetch, () => clock);
+
+    await assert.rejects(catalog.searchTracks('love', 0), BusyError);
+    clock = waitMs - 1;
+    await assert.rejects(catalog.searchTracks('love', 0), BusyError);
+    const sent = searchRequests(calls).length;
+    clock = waitMs;
+    await catalog.searchTracks('love', 0);
+
+    assert.equal(searchRequests(calls).length, sent + 1);
+  });
+}
+
+test('refuses Spotify calls beyond the call budget without sending them', async () => {
+  const { fetch, calls } = fakeFetch(routes([]));
+  let clock = 0;
+  const catalog = spotify(CREDS, fetch, () => clock);
+
+  const results = await Promise.allSettled(
+    Array.from({ length: 20 }, (_, i) => catalog.searchTracks(`term${i}`, 0)),
+  );
+  const refused = results.filter((r) => r.status === 'rejected' && r.reason instanceof BusyError);
+
+  assert.equal(calls.length, 10);
+  assert.equal(refused.length, 11);
+  clock = 2 * SECOND_MS;
+  await catalog.searchTracks('again', 0);
+  await assert.rejects(catalog.searchTracks('once more', 0), BusyError);
+  assert.equal(calls.length, 11);
 });
