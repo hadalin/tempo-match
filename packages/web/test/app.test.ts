@@ -5,7 +5,7 @@ import { fakeDocument, type FakeElement, type FakeFrameWindow } from './fake-dom
 
 const EMBED_SOURCE = await readFile(new URL('../public/spotify-embed.js', import.meta.url), 'utf8');
 const APP_SOURCE = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-const IDS = ['form', 'bpm', 'value', 'submit', 'autoplay', 'result', 'down', 'up'];
+const IDS = ['form', 'bpm', 'value', 'submit', 'autoplay', 'autoplay-tip', 'result', 'down', 'up'];
 const NOW = Date.UTC(2026, 9, 17, 12);
 const SONG = { title: 'Song', artist: 'Artist', bpm: 120, spotifyTrackId: '1' };
 const LUCKY_SONG = { title: 'Lucky', artist: 'Artist', bpm: 97, spotifyTrackId: '2' };
@@ -23,6 +23,7 @@ const PREVIEW_MS = 29713;
 const FULL_TRACK_MS = 215000;
 const READY_TIMEOUT_MS = 10000;
 const PLAY_TIMEOUT_MS = 5000;
+const TOOLTIP_AFTER_TAP_MS = 1500;
 
 function tooMany(headers: Record<string, string> = {}): Response {
   return new Response(CLOUDFLARE_PAGE, { status: 429, headers: { 'Content-Type': 'text/html', ...headers } });
@@ -90,6 +91,7 @@ function loadApp(
     form: element('form'),
     submit: element('submit'),
     autoplay: element('autoplay'),
+    tip: element('autoplay-tip'),
     result: element('result'),
     slider: element('bpm'),
     value: element('value'),
@@ -355,15 +357,16 @@ for (const [device, navigator] of [['desktop Safari', DESKTOP_MAC], ['desktop Ch
 }
 
 const AUTOPLAY_STATES = [
-  { title: 'Autoplay off', ariaLabel: 'Autoplay: off. Click to autoplay same tempo', announced: 'Autoplay off', icons: [null] },
-  { title: 'Autoplay', ariaLabel: 'Autoplay: same tempo. Click to autoplay random tempo', announced: 'Autoplay same tempo', icons: [null] },
-  { title: 'Autoplay random', ariaLabel: 'Autoplay: random tempo. Click to turn autoplay off', announced: 'Autoplay random tempo', icons: [null, 'dice'] },
+  { tip: 'Autoplay off', ariaLabel: 'Autoplay: off. Click to autoplay same tempo', announced: 'Autoplay off', icons: [null] },
+  { tip: 'Autoplay: same tempo', ariaLabel: 'Autoplay: same tempo. Click to autoplay random tempo', announced: 'Autoplay same tempo', icons: [null] },
+  { tip: 'Autoplay: random tempo', ariaLabel: 'Autoplay: random tempo. Click to turn autoplay off', announced: 'Autoplay random tempo', icons: [null, 'dice'] },
 ] as const;
 
 test('starts with autoplay off', () => {
   const app = loadApp(async () => Response.json(SONG));
 
-  assert.equal(app.autoplay.title, 'Autoplay off');
+  assert.equal(app.tip.textContent, 'Autoplay off');
+  assert.equal(app.tip.className, '');
   assert.equal(app.autoplay.getAttribute('aria-label'), 'Autoplay: off. Click to autoplay same tempo');
   assert.equal(app.autoplay.getAttribute('data-mode'), 'off');
 });
@@ -375,7 +378,8 @@ test('cycles autoplay off, same tempo, random tempo, and back off, announcing ea
   for (const state of [...AUTOPLAY_STATES.slice(1), AUTOPLAY_STATES[0]]) {
     await cycleTo(app, 1);
 
-    assert.equal(app.autoplay.title, state.title);
+    assert.equal(app.tip.textContent, state.tip);
+    assert.equal(app.autoplay.title, '');
     assert.equal(app.autoplay.getAttribute('aria-label'), state.ariaLabel);
     assert.deepEqual(icons(app.autoplay), state.icons);
     assert.deepEqual(announcements(app.result), [state.announced]);
@@ -388,19 +392,19 @@ test('cycles autoplay before any song is found', async () => {
 
   await cycleTo(app, 2);
 
-  assert.equal(app.autoplay.title, 'Autoplay random');
+  assert.equal(app.tip.textContent, 'Autoplay: random tempo');
   assert.deepEqual(announcements(app.result), ['Autoplay random tempo']);
 });
 
-for (const [clicks, { title }] of AUTOPLAY_STATES.entries()) {
-  test(`remembers ${title.toLowerCase()} across page loads`, async () => {
+for (const [clicks, { tip }] of AUTOPLAY_STATES.entries()) {
+  test(`remembers ${tip.toLowerCase()} across page loads`, async () => {
     const storage = new MemoryStorage();
     const first = loadApp(async () => Response.json(SONG), '', DESKTOP_MAC, storage);
     await cycleTo(first, clicks);
 
     const second = loadApp(async () => Response.json(SONG), '', DESKTOP_MAC, storage);
 
-    assert.equal(second.autoplay.title, title);
+    assert.equal(second.tip.textContent, tip);
   });
 }
 
@@ -409,7 +413,7 @@ test('ignores an unknown saved autoplay mode', () => {
   storage.setItem('autoplay', 'shuffle');
   const app = loadApp(async () => Response.json(SONG), '', DESKTOP_MAC, storage);
 
-  assert.equal(app.autoplay.title, 'Autoplay off');
+  assert.equal(app.tip.textContent, 'Autoplay off');
 });
 
 test('cycles autoplay when storage is blocked', async () => {
@@ -417,8 +421,44 @@ test('cycles autoplay when storage is blocked', async () => {
 
   await cycleTo(app, 1);
 
-  assert.equal(app.autoplay.title, 'Autoplay');
+  assert.equal(app.tip.textContent, 'Autoplay: same tempo');
 });
+
+test('shows the autoplay tooltip briefly after a tap', async () => {
+  const app = loadApp(async () => Response.json(SONG));
+
+  await cycleTo(app, 1);
+  assert.equal(app.tip.className, 'tooltip shown');
+  mock.timers.tick(TOOLTIP_AFTER_TAP_MS - 1);
+  assert.equal(app.tip.className, 'tooltip shown');
+  mock.timers.tick(1);
+
+  assert.equal(app.tip.className, 'tooltip');
+});
+
+test('updates the shown tooltip at once when clicked again', async () => {
+  const app = loadApp(async () => Response.json(SONG));
+  await cycleTo(app, 1);
+  mock.timers.tick(TOOLTIP_AFTER_TAP_MS - 100);
+
+  await cycleTo(app, 1);
+
+  assert.equal(app.tip.textContent, 'Autoplay: random tempo');
+  assert.equal(app.tip.className, 'tooltip shown');
+  mock.timers.tick(TOOLTIP_AFTER_TAP_MS - 1);
+  assert.equal(app.tip.className, 'tooltip shown');
+});
+
+for (const leave of ['mouseleave', 'blur']) {
+  test(`hides the autoplay tooltip on ${leave}`, async () => {
+    const app = loadApp(async () => Response.json(SONG));
+    await cycleTo(app, 1);
+
+    await app.autoplay.dispatch(leave);
+
+    assert.equal(app.tip.className, 'tooltip');
+  });
+}
 
 test('does nothing when a song ends with autoplay off', async () => {
   const fetch = mock.fn(async (_: string) => Response.json(SONG));

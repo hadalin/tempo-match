@@ -119,6 +119,36 @@
     #autoplay svg { width: 26px; height: 26px; margin: 0; }
     #autoplay .dice { width: 14px; height: 14px; }
     #autoplay:not([data-mode=off]) { color: var(--outline); }
+    .tip-anchor { position: relative; flex: none; }
+    .tooltip {
+      position: absolute;
+      right: 0;
+      bottom: calc(100% + 10px);
+      z-index: 1;
+      padding: 6px 10px;
+      border-radius: 8px;
+      background: var(--fg);
+      color: var(--bg);
+      font-size: .85rem;
+      font-weight: 600;
+      white-space: nowrap;
+      pointer-events: none;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity .15s, visibility .15s;
+    }
+    .tooltip::after {
+      content: '';
+      position: absolute;
+      top: 100%;
+      right: 22px;
+      border: 6px solid transparent;
+      border-top-color: var(--fg);
+    }
+    #autoplay:focus-visible + .tooltip, .tooltip.shown { opacity: 1; visibility: visible; }
+    @media (hover: hover) {
+      #autoplay:hover + .tooltip { opacity: 1; visibility: visible; }
+    }
     .card .autoplay-note { margin: 4px 0 0; font-size: .85rem; text-align: center; }
     .error { color: var(--error); }
     .visually-hidden {
@@ -149,7 +179,10 @@
       <input id="bpm" name="bpm" type="range" min="40" max="220" value="120" aria-label="Tempo slider">
       <div class="actions">
         <button id="submit" type="submit">Find a song</button>
-        <button id="autoplay" class="step" type="button"></button>
+        <span class="tip-anchor">
+          <button id="autoplay" class="step" type="button"></button>
+          <span id="autoplay-tip" class="tooltip" aria-hidden="true"></span>
+        </span>
       </div>
     </form>
     <section id="result" aria-live="polite"></section>

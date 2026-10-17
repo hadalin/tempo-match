@@ -3,6 +3,7 @@ const slider = document.getElementById('bpm');
 const value = document.getElementById('value');
 const submit = document.getElementById('submit');
 const autoplayButton = document.getElementById('autoplay');
+const autoplayTip = document.getElementById('autoplay-tip');
 const result = document.getElementById('result');
 const SPOTIFY_ID = /^[A-Za-z0-9]+$/;
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -25,15 +26,18 @@ const AUTOPLAY_OFF = 'off';
 const AUTOPLAY_SAME_TEMPO = 'same';
 const AUTOPLAY_RANDOM_TEMPO = 'random';
 const AUTOPLAY_MODES = {
-  [AUTOPLAY_OFF]: { label: 'Autoplay off', state: 'off', next: AUTOPLAY_SAME_TEMPO },
-  [AUTOPLAY_SAME_TEMPO]: { label: 'Autoplay', state: 'same tempo', next: AUTOPLAY_RANDOM_TEMPO },
-  [AUTOPLAY_RANDOM_TEMPO]: { label: 'Autoplay random', state: 'random tempo', next: AUTOPLAY_OFF },
+  [AUTOPLAY_OFF]: { tip: 'Autoplay off', state: 'off', next: AUTOPLAY_SAME_TEMPO },
+  [AUTOPLAY_SAME_TEMPO]: { tip: 'Autoplay: same tempo', state: 'same tempo', next: AUTOPLAY_RANDOM_TEMPO },
+  [AUTOPLAY_RANDOM_TEMPO]: { tip: 'Autoplay: random tempo', state: 'random tempo', next: AUTOPLAY_OFF },
 };
 const AUTOPLAY_ACTIONS = {
   [AUTOPLAY_OFF]: 'turn autoplay off',
   [AUTOPLAY_SAME_TEMPO]: 'autoplay same tempo',
   [AUTOPLAY_RANDOM_TEMPO]: 'autoplay random tempo',
 };
+const TOOLTIP_AFTER_TAP_MS = 1500;
+const TOOLTIP = 'tooltip';
+const TOOLTIP_SHOWN = 'tooltip shown';
 const AUTOPLAY_UNAVAILABLE_NOTE = 'Autoplay unavailable right now';
 const PLAY_BLOCKED_NOTE = 'Tap play to start the next song';
 const LOOP_ICON_PATH = 'M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3';
@@ -46,6 +50,7 @@ let autoplay = savedAutoplay();
 let autoplayUnavailable = false;
 let playback = null;
 let autoplayAnnouncement = null;
+let tooltipTimer;
 
 function iosDevice() {
   const match = navigator.userAgent.match(IOS_DEVICE);
@@ -100,7 +105,10 @@ autoplayButton.addEventListener('click', () => {
   saveAutoplay();
   showAutoplay();
   announceAutoplay();
+  showTooltip();
 });
+autoplayButton.addEventListener('mouseleave', hideTooltip);
+autoplayButton.addEventListener('blur', hideTooltip);
 
 async function randomSong() {
   const song = await search(`/api/song?lucky=1&exclude=${slider.value}`);
@@ -258,12 +266,23 @@ function showAutoplay() {
   const mode = AUTOPLAY_MODES[autoplay];
   autoplayButton.setAttribute('data-mode', autoplay);
   autoplayButton.setAttribute('aria-label', `Autoplay: ${mode.state}. Click to ${AUTOPLAY_ACTIONS[mode.next]}`);
-  autoplayButton.title = mode.label;
+  autoplayTip.textContent = mode.tip;
   const icons = [loopIcon()];
   if (autoplay === AUTOPLAY_RANDOM_TEMPO) {
     icons.push(diceIcon());
   }
   autoplayButton.replaceChildren(...icons);
+}
+
+function showTooltip() {
+  clearTimeout(tooltipTimer);
+  autoplayTip.className = TOOLTIP_SHOWN;
+  tooltipTimer = setTimeout(hideTooltip, TOOLTIP_AFTER_TAP_MS);
+}
+
+function hideTooltip() {
+  clearTimeout(tooltipTimer);
+  autoplayTip.className = TOOLTIP;
 }
 
 function announceAutoplay() {
