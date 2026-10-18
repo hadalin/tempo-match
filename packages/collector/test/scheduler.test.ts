@@ -5,16 +5,18 @@ import {
   identityOf,
   REFRESH_AFTER_MS,
   SOURCE_GETSONGBPM,
+  UNTIL_UNBLOCKED,
   utcDay,
   type Suspect,
 } from '@tempo-match/catalog';
 import { CallKind, dispatcher } from '../src/dispatcher.ts';
-import { RefusedError, UpstreamError } from '../src/errors.ts';
+import { RefusedError, UnauthorizedError, UpstreamError } from '../src/errors.ts';
 import { SPOTIFY } from '../src/policies.ts';
 import { featureChecks, Job, spotifyJobs } from '../src/scheduler.ts';
-import type { LookupSong } from '../src/spotify.ts';
+import { spotify as spotifyLookup, type LookupSong } from '../src/spotify.ts';
 import { memoryCatalog } from './catalog.ts';
 import { fakeClock, NOW } from './fake-clock.ts';
+import { fakeFetch, json } from './fake-fetch.ts';
 
 const ID = (letter: string) => letter.repeat(22);
 
@@ -144,6 +146,30 @@ test('a lookup that would fail the same way again is stored as not found', async
   assert.equal(await jobs.step(), Job.Fill);
 
   assert.equal(db.prepare('SELECT reason FROM misses').get()?.reason, 'not-found');
+});
+
+test('a token the endpoint refuses holds Spotify and stores nothing', async () => {
+  const { db, t } = memoryCatalog();
+  const clock = fakeClock();
+  const { fetch } = fakeFetch(() => json({ error: 'invalid_client' }, 400));
+  const calls = dispatcher(db, SPOTIFY, clock);
+  const lookup = spotifyLookup({ clientId: 'id', clientSecret: 'rotated' }, calls, fetch, clock.now);
+  const jobs = spotifyJobs(db, { market: 'US', transitions: t, spotify: lookup, calls, clock, suspects: () => [], random: () => 0 });
+  const list = (title: string) =>
+    t.upsertListings([{ identity: identityOf(title, 'A'), bpm: 120, title, artist: 'A', popularity: 0.5, source: SOURCE_GETSONGBPM }], clock.now());
+  mock.method(console, 'log', () => {});
+  list('Old');
+  t.applyLookup('US', identityOf('Old', 'A'), ID('A'), clock.now());
+  clock.advance(REFRESH_AFTER_MS);
+  list('Old');
+  list('New');
+
+  await assert.rejects(jobs.step(), UnauthorizedError);
+  await assert.rejects(jobs.step(), RefusedError);
+
+  assert.equal(db.prepare("SELECT held_until FROM upstream WHERE service = 'spotify'").get()?.held_until, UNTIL_UNBLOCKED);
+  assert.equal(db.prepare('SELECT count(*) AS n FROM misses').get()?.n, 0);
+  assert.equal(db.prepare('SELECT count(*) AS n FROM picks').get()?.n, 1);
 });
 
 test('passes the ISRC of the most popular listing that has one', async () => {

@@ -1,6 +1,6 @@
 import { MIN_SONG_SECONDS, normalize, normalizeTitle } from '@tempo-match/catalog';
 import { CallKind, type Dispatcher } from './dispatcher.ts';
-import { ResponseFormatError, UpstreamError } from './errors.ts';
+import { ResponseFormatError, retriesLater, UnauthorizedError, UpstreamError } from './errors.ts';
 import { request, SECOND_MS } from './upstream.ts';
 
 const TOKEN_URL = 'https://accounts.spotify.com/api/token';
@@ -61,18 +61,33 @@ export function spotify(
 
     const basic = Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString('base64');
     token = await calls.call(CallKind.Plain, async () => {
-      const res = await request(TOKEN, fetchFn, TOKEN_URL, {
-        method: 'POST',
-        headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ grant_type: 'client_credentials' }),
-      });
-      const body = (await res.json()) as { access_token?: string; expires_in?: number };
-      if (typeof body.access_token !== 'string' || typeof body.expires_in !== 'number') {
-        throw new UpstreamError(TOKEN, 'no token in the answer');
+      try {
+        return await fetchToken(basic);
+      } catch (err) {
+        if (retriesLater(err)) {
+          throw err;
+        }
+        // Spotify answers a bad secret or a removed app with 400 invalid_client, not 401.
+        if (err instanceof UpstreamError) {
+          throw new UnauthorizedError(TOKEN, err);
+        }
+        throw new ResponseFormatError(TOKEN, (err as Error).message);
       }
-      return { value: body.access_token, expiresAt: now() + body.expires_in * SECOND_MS - TOKEN_REFRESH_MARGIN_MS };
     });
     return token.value;
+  }
+
+  async function fetchToken(basic: string): Promise<Token> {
+    const res = await request(TOKEN, fetchFn, TOKEN_URL, {
+      method: 'POST',
+      headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'client_credentials' }),
+    });
+    const body = (await res.json()) as { access_token?: string; expires_in?: number };
+    if (typeof body.access_token !== 'string' || typeof body.expires_in !== 'number') {
+      throw new ResponseFormatError(TOKEN, 'no token in the answer');
+    }
+    return { value: body.access_token, expiresAt: now() + body.expires_in * SECOND_MS - TOKEN_REFRESH_MARGIN_MS };
   }
 
   async function search(query: string, market: string, kind: CallKind): Promise<SearchTrack[]> {

@@ -29,10 +29,10 @@ export class RateLimitedError extends UpstreamError {
   }
 }
 
-/** 401 or 403: no call until an operator unblocks the service. */
+/** 401, 403 or refused credentials: no call until an operator unblocks the service. */
 export class UnauthorizedError extends UpstreamError {
-  constructor(service: string, status: number) {
-    super(service, status);
+  constructor(service: string, failure: number | Error) {
+    super(service, failure);
     this.name = 'UnauthorizedError';
   }
 }
