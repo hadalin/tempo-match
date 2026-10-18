@@ -3,9 +3,6 @@
 [![Tests](https://github.com/hadalin/tempo-match/actions/workflows/test.yml/badge.svg)](https://github.com/hadalin/tempo-match/actions/workflows/test.yml)
 
 Pick a BPM, get a song at that tempo with a Spotify link. Live at <https://tempo-match.hadalin.me>.
-The autoplay button next to Find a song cycles off, autoplay, and autoplay random. After you start the first song,
-autoplay plays another song at the same tempo when it ends; autoplay random picks a song at another tempo instead
-and sets the BPM to it.
 
 Spotify no longer serves tempo data to new apps, so tempo comes from
 [GetSongBPM](https://getsongbpm.com/api) and [Deezer](https://developers.deezer.com/api).
