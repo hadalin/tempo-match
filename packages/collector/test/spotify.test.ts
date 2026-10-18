@@ -1,413 +1,121 @@
 import assert from 'node:assert/strict';
-import { test, type TestContext } from 'node:test';
-import { BusyError, spotify, UpstreamError } from '../src/index.ts';
-import { fakeFetch, json, type Call, type Route } from './fake-fetch.ts';
+import { mock, test } from 'node:test';
+import { UNTIL_UNBLOCKED } from '@tempo-match/catalog';
+import { CallKind, dispatcher } from '../src/dispatcher.ts';
+import { ResponseFormatError } from '../src/errors.ts';
+import { SPOTIFY } from '../src/policies.ts';
+import { spotify, type LookupSong } from '../src/spotify.ts';
+import { memoryCatalog } from './catalog.ts';
+import { fakeClock } from './fake-clock.ts';
+import { fakeFetch, json, type Route } from './fake-fetch.ts';
 
-const CREDS = { clientId: 'id', clientSecret: 'secret', market: 'US' };
+const ID = '4cOdK2wGLETKBW3PvgPWqT';
+const OTHER = '0VjIjW4GlUZAMYd2vXMi3b';
+const SONG: LookupSong = { title: 'Dreams', artist: 'Fleetwood Mac', isrc: null };
+const ISRC = 'USWB10400046';
 
-function track(artist: string, id: string, name = 'Song', durationMs = 200_000) {
-  return {
-    id,
-    name,
-    duration_ms: durationMs,
-    artists: [{ name: artist }],
-    external_urls: { spotify: `https://open.spotify.com/track/${id}` },
-  };
+function track(extra: Record<string, unknown> = {}) {
+  return { id: ID, name: 'Dreams', artists: [{ name: 'Fleetwood Mac' }], duration_ms: 257_000, is_playable: true, ...extra };
 }
 
-function tokenRequests(calls: Call[]): Call[] {
-  return calls.filter((c) => c.url.hostname === 'accounts.spotify.com');
-}
-
-function searchRequests(calls: Call[]): Call[] {
-  return calls.filter((c) => c.url.pathname === '/v1/search');
-}
-
-function routes(items: unknown[], tokenStatus = 200): Route {
-  return (url) => {
-    if (url.href === 'https://accounts.spotify.com/api/token') {
-      return json({ access_token: 'tok', token_type: 'Bearer', expires_in: 3600 }, tokenStatus);
+function setup(searches: (url: URL) => unknown[]) {
+  const { db } = memoryCatalog();
+  const clock = fakeClock();
+  const route: Route = (url) => {
+    if (url.hostname === 'accounts.spotify.com') {
+      return json({ access_token: 'token', expires_in: 3600 });
     }
-    if (url.pathname === '/v1/search') {
-      return json({ tracks: { items } });
-    }
-    return undefined;
+    return json({ tracks: { items: searches(url) } });
   };
+  const { fetch, calls } = fakeFetch(route);
+  const lookup = spotify({ clientId: 'id', clientSecret: 'secret' }, dispatcher(db, SPOTIFY, clock), fetch, clock.now);
+  const searched = () => calls.filter((c) => c.url.hostname === 'api.spotify.com').map((c) => c.url);
+  return { db, lookup, calls, searched };
 }
 
-test('authenticates with client credentials', async () => {
-  const { fetch, calls } = fakeFetch(routes([track('Eagles', '1')]));
+test('authenticates with client credentials once and counts the token call', async () => {
+  const { db, lookup, calls } = setup(() => [track()]);
 
-  await spotify(CREDS, fetch).findTrackId({ title: 'Hotel California', artist: 'Eagles' });
+  await lookup.lookup(SONG, 'US', CallKind.Plain);
+  await lookup.lookup(SONG, 'US', CallKind.Plain);
 
-  const init = calls[0].init!;
-  assert.equal(init.method, 'POST');
-  assert.equal(String(init.body), 'grant_type=client_credentials');
-  const headers = init.headers as Record<string, string>;
-  assert.equal(headers.Authorization, `Basic ${Buffer.from('id:secret').toString('base64')}`);
+  const tokens = calls.filter((c) => c.url.hostname === 'accounts.spotify.com');
+  assert.equal(tokens.length, 1);
+  assert.equal(new Headers(tokens[0].init?.headers).get('Authorization'), `Basic ${btoa('id:secret')}`);
+  assert.equal(db.prepare("SELECT calls FROM upstream WHERE service = 'spotify'").get()?.calls, 3);
 });
 
-test('searches by track and artist and returns the matching track id', async () => {
-  const { fetch, calls } = fakeFetch(
-    routes([
-      track('Eagles Tribute Band', 'cover', 'Hotel California'),
-      track('Eagles', 'original', 'Hotel California'),
-    ]),
-  );
+test('searches by title and artist in the market and returns the playable match', async () => {
+  const { lookup, searched } = setup(() => [track({ id: OTHER, name: 'Dreams (Live)', artists: [{ name: 'Other' }] }), track()]);
 
-  const id = await spotify(CREDS, fetch).findTrackId({
-    title: 'Hotel California',
-    artist: 'Eagles',
+  assert.equal(await lookup.lookup(SONG, 'SI', CallKind.Plain), ID);
+
+  const [url] = searched();
+  assert.equal(url.searchParams.get('q'), 'track:"Dreams" artist:"Fleetwood Mac"');
+  assert.equal(url.searchParams.get('market'), 'SI');
+  assert.equal(url.searchParams.get('type'), 'track');
+});
+
+test('matches a title with a remaster suffix and artists ignoring case and diacritics', async () => {
+  const { lookup } = setup(() => [track({ name: 'Dreams - 2004 Remaster', artists: [{ name: 'FLEETWOOD MÁC' }] })]);
+
+  assert.equal(await lookup.lookup(SONG, 'US', CallKind.Plain), ID);
+});
+
+const UNPLAYABLE = [
+  ['marked unplayable', { is_playable: false }],
+  ['restricted in the market', { restrictions: { reason: 'market' } }],
+  ['shorter than 90 seconds', { duration_ms: 60_000 }],
+] as const;
+
+for (const [label, extra] of UNPLAYABLE) {
+  test(`skips a track ${label}`, async () => {
+    const { lookup } = setup(() => [track(extra)]);
+
+    assert.equal(await lookup.lookup(SONG, 'US', CallKind.Plain), null);
   });
-
-  assert.equal(id, 'original');
-  const search = calls[1];
-  assert.equal(search.url.searchParams.get('q'), 'track:"Hotel California" artist:"Eagles"');
-  assert.equal(search.url.searchParams.get('type'), 'track');
-  assert.equal(search.url.searchParams.get('market'), 'US');
-  assert.deepEqual(search.init?.headers, { Authorization: 'Bearer tok' });
-});
-
-test('matches artists ignoring case and diacritics', async () => {
-  const { fetch } = fakeFetch(routes([track('Beyoncé', 'b', 'Halo')]));
-
-  const id = await spotify(CREDS, fetch).findTrackId({ title: 'Halo', artist: 'beyonce' });
-
-  assert.equal(id, 'b');
-});
-
-test('skips a result by the artist whose title only starts like the song', async () => {
-  const { fetch } = fakeFetch(
-    routes([track('Prunella Scales', 'reading', 'When All the World Is Young, Lad')]),
-  );
-
-  const id = await spotify(CREDS, fetch).findTrackId({ title: 'When', artist: 'Prunella Scales' });
-
-  assert.equal(id, null);
-});
-
-test('matches a title with a remaster or featured-artist suffix', async () => {
-  const { fetch } = fakeFetch(
-    routes([track('Rihanna', 'stay', 'Stay (feat. Mikky Ekko) - Remastered 2011')]),
-  );
-
-  const id = await spotify(CREDS, fetch).findTrackId({ title: 'Stay', artist: 'Rihanna' });
-
-  assert.equal(id, 'stay');
-});
-
-test('skips results shorter than 90 seconds', async () => {
-  const { fetch } = fakeFetch(
-    routes([
-      track('Eagles', 'short', 'Hotel California', 89_999),
-      track('Eagles', 'full', 'Hotel California', 90_000),
-    ]),
-  );
-
-  const id = await spotify(CREDS, fetch).findTrackId({
-    title: 'Hotel California',
-    artist: 'Eagles',
-  });
-
-  assert.equal(id, 'full');
-});
-
-test('returns null when no result is by the artist', async () => {
-  const { fetch } = fakeFetch(routes([track('Someone Else', 'x')]));
-
-  const id = await spotify(CREDS, fetch).findTrackId({ title: 'Halo', artist: 'Beyoncé' });
-
-  assert.equal(id, null);
-});
-
-test('reuses the token until it nears expiry', async () => {
-  const { fetch, calls } = fakeFetch(routes([]));
-  let clock = 0;
-  const catalog = spotify(CREDS, fetch, () => clock);
-
-  await catalog.findTrackId({ title: 'a', artist: 'b' });
-  await catalog.findTrackId({ title: 'c', artist: 'd' });
-  clock = 3600 * 1000;
-  await catalog.findTrackId({ title: 'e', artist: 'f' });
-
-  assert.equal(tokenRequests(calls).length, 2);
-});
-
-test('shares one pending token request between concurrent searches', async () => {
-  const pendingToken = Promise.withResolvers<Response>();
-  const search = routes([]);
-  const { fetch, calls } = fakeFetch((url, init) =>
-    url.hostname === 'accounts.spotify.com' ? pendingToken.promise : search(url, init),
-  );
-  const catalog = spotify(CREDS, fetch);
-
-  const searches = Promise.all([
-    catalog.findTrackId({ title: 'a', artist: 'b' }),
-    catalog.findTrackId({ title: 'c', artist: 'd' }),
-  ]);
-  pendingToken.resolve(json({ access_token: 'tok', expires_in: 3600 }));
-  await searches;
-
-  assert.equal(tokenRequests(calls).length, 1);
-  assert.equal(searchRequests(calls).length, 2);
-});
-
-test('requests a new token after a failed one', async () => {
-  let tokenStatus = 500;
-  const { fetch, calls } = fakeFetch((url, init) => routes([], tokenStatus)(url, init));
-  const catalog = spotify(CREDS, fetch);
-
-  await assert.rejects(catalog.findTrackId({ title: 'a', artist: 'b' }), UpstreamError);
-  tokenStatus = 200;
-  await catalog.findTrackId({ title: 'a', artist: 'b' });
-
-  assert.equal(tokenRequests(calls).length, 2);
-});
-
-test('caches found and missing tracks until the cache entry expires', async () => {
-  const { fetch, calls } = fakeFetch(routes([track('Eagles', '1', 'Hotel California')]));
-  let clock = 0;
-  const catalog = spotify(CREDS, fetch, () => clock);
-
-  const searches = await Promise.all([
-    catalog.findTrackId({ title: 'Hotel California', artist: 'Eagles' }),
-    catalog.findTrackId({ title: 'Hotel California', artist: 'Eagles' }),
-    catalog.findTrackId({ title: 'Halo', artist: 'Beyoncé' }),
-  ]);
-  await catalog.findTrackId({ title: 'Halo', artist: 'Beyoncé' });
-  clock = 25 * 3600 * 1000;
-  await catalog.findTrackId({ title: 'Hotel California', artist: 'Eagles' });
-
-  assert.deepEqual(searches, ['1', '1', null]);
-  assert.equal(searchRequests(calls).length, 3);
-});
-
-test('searches in the market passed to the call', async () => {
-  const { fetch, calls } = fakeFetch(routes([]));
-
-  await spotify(CREDS, fetch).findTrackId({ title: 'a', artist: 'b' }, 'SI');
-
-  assert.equal(searchRequests(calls)[0].url.searchParams.get('market'), 'SI');
-});
-
-test('keeps cached tracks apart per market', async () => {
-  const { fetch, calls } = fakeFetch(routes([track('Eagles', '1')]));
-  const catalog = spotify(CREDS, fetch);
-
-  await catalog.findTrackId({ title: 'Hotel California', artist: 'Eagles' });
-  await catalog.findTrackId({ title: 'Hotel California', artist: 'Eagles' }, 'SI');
-  await catalog.findTrackId({ title: 'Hotel California', artist: 'Eagles' }, 'US');
-  await catalog.findTrackId({ title: 'Hotel California', artist: 'Eagles' }, 'SI');
-
-  const markets = searchRequests(calls).map((c) => c.url.searchParams.get('market'));
-  assert.deepEqual(markets, ['US', 'SI']);
-});
-
-test('bounds every request with a timeout', async () => {
-  const { fetch, calls } = fakeFetch(routes([]));
-
-  await spotify(CREDS, fetch).findTrackId({ title: 'a', artist: 'b' });
-
-  assert.equal(calls.length, 2);
-  for (const call of calls) {
-    assert.ok(call.init?.signal instanceof AbortSignal);
-  }
-});
-
-test('throws UpstreamError when authentication fails', async () => {
-  const { fetch } = fakeFetch(routes([], 400));
-
-  await assert.rejects(
-    spotify(CREDS, fetch).findTrackId({ title: 'a', artist: 'b' }),
-    UpstreamError,
-  );
-});
-
-function isrcRoutes(isrcItems: unknown[], titleItems: unknown[]): Route {
-  return (url, init) => {
-    if (url.searchParams.get('q')?.startsWith('isrc:')) {
-      return json({ tracks: { items: isrcItems } });
-    }
-    return routes(titleItems)(url, init);
-  };
 }
 
-const WITH_ISRC = { title: 'Dreams', artist: 'Fleetwood Mac', isrc: 'USWB10400046' };
+test('looks a song up by ISRC first and trusts that match whatever its title', async () => {
+  const { lookup, searched } = setup(() => [track({ name: 'Something else' })]);
 
-test('looks a track up by ISRC first', async () => {
-  const { fetch, calls } = fakeFetch(isrcRoutes([track('Fleetwood Mac', 'exact')], []));
-
-  const id = await spotify(CREDS, fetch).findTrackId(WITH_ISRC, 'SI');
-
-  assert.equal(id, 'exact');
-  const searches = searchRequests(calls);
-  assert.equal(searches.length, 1);
-  assert.equal(searches[0].url.searchParams.get('q'), 'isrc:USWB10400046');
-  assert.equal(searches[0].url.searchParams.get('type'), 'track');
-  assert.equal(searches[0].url.searchParams.get('market'), 'SI');
+  assert.equal(await lookup.lookup({ ...SONG, isrc: ISRC }, 'US', CallKind.Plain), ID);
+  assert.deepEqual(searched().map((url) => url.searchParams.get('q')), [`isrc:${ISRC}`]);
 });
 
-test('falls back to title and artist when the ISRC finds nothing', async () => {
-  const { fetch, calls } = fakeFetch(
-    isrcRoutes([], [track('Fleetwood Mac', 'by-title', 'Dreams')]),
-  );
+test('falls back to title and artist when the ISRC finds nothing playable', async () => {
+  const { lookup, searched } = setup((url) =>
+    url.searchParams.get('q')!.startsWith('isrc:') ? [track({ is_playable: false })] : [track({ id: OTHER })]);
 
-  const id = await spotify(CREDS, fetch).findTrackId(WITH_ISRC);
-
-  assert.equal(id, 'by-title');
-  assert.deepEqual(
-    searchRequests(calls).map((c) => c.url.searchParams.get('q')),
-    ['isrc:USWB10400046', 'track:"Dreams" artist:"Fleetwood Mac"'],
-  );
-});
-
-test('trusts the ISRC match whatever its title', async () => {
-  const { fetch } = fakeFetch(isrcRoutes([track('Fleetwood Mac', 'exact', 'Dreams - Live')], []));
-
-  const id = await spotify(CREDS, fetch).findTrackId(WITH_ISRC);
-
-  assert.equal(id, 'exact');
-});
-
-test('skips a short ISRC match without searching by title', async () => {
-  const short = track('Fleetwood Mac', 'short', 'Dreams', 60_000);
-  const { fetch, calls } = fakeFetch(isrcRoutes([short], [track('Fleetwood Mac', 'x', 'Dreams')]));
-
-  const id = await spotify(CREDS, fetch).findTrackId(WITH_ISRC);
-
-  assert.equal(id, null);
-  assert.equal(searchRequests(calls).length, 1);
+  assert.equal(await lookup.lookup({ ...SONG, isrc: ISRC }, 'US', CallKind.Plain), OTHER);
+  assert.equal(searched().length, 2);
 });
 
 test('skips a malformed ISRC', async () => {
-  const { fetch, calls } = fakeFetch(isrcRoutes([track('A', 'x')], []));
+  const { lookup, searched } = setup(() => [track()]);
 
-  await spotify(CREDS, fetch).findTrackId({ title: 'a', artist: 'b', isrc: 'X" OR 1' });
+  await lookup.lookup({ ...SONG, isrc: 'not-an-isrc' }, 'US', CallKind.Plain);
 
-  assert.deepEqual(
-    searchRequests(calls).map((c) => c.url.searchParams.get('q')),
-    ['track:"a" artist:"b"'],
-  );
+  assert.deepEqual(searched().map((url) => url.searchParams.get('q')), ['track:"Dreams" artist:"Fleetwood Mac"']);
 });
 
-test('caches ISRC lookups per market', async () => {
-  const { fetch, calls } = fakeFetch(isrcRoutes([track('Fleetwood Mac', 'exact')], []));
-  const catalog = spotify(CREDS, fetch);
+test('holds Spotify and stores nothing when results lack is_playable', async () => {
+  const { db, lookup } = setup(() => [track({ is_playable: undefined })]);
+  mock.method(console, 'error', () => {});
 
-  await catalog.findTrackId(WITH_ISRC);
-  await catalog.findTrackId(WITH_ISRC);
-  await catalog.findTrackId(WITH_ISRC, 'SI');
+  await assert.rejects(lookup.lookup(SONG, 'US', CallKind.Plain), ResponseFormatError);
 
-  const markets = searchRequests(calls).map((c) => c.url.searchParams.get('market'));
-  assert.deepEqual(markets, ['US', 'SI']);
+  assert.equal(db.prepare("SELECT held_until FROM upstream WHERE service = 'spotify'").get()?.held_until, UNTIL_UNBLOCKED);
+  assert.equal(db.prepare('SELECT count(*) AS n FROM misses').get()?.n, 0);
 });
 
-test('searches a page of tracks for a term at an offset', async () => {
-  const noArtist = { ...track('', 'no-artist'), artists: [] };
-  const short = track('Poet', 'short', 'Love', 60_000);
-  const { fetch, calls } = fakeFetch(routes([track('Tom Odell', 'love'), noArtist, short]));
+test('counts both searches of a re-check against the re-check share', async () => {
+  const { db, lookup } = setup((url) => (url.searchParams.get('q')!.startsWith('isrc:') ? [] : [track()]));
 
-  const tracks = await spotify(CREDS, fetch).searchTracks('love', 120, 'SI');
+  await lookup.lookup({ ...SONG, isrc: ISRC }, 'US', CallKind.Recheck);
 
-  assert.deepEqual(tracks, [{ spotifyTrackId: 'love', title: 'Song', artist: 'Tom Odell' }]);
-  const { searchParams } = searchRequests(calls)[0].url;
-  assert.equal(searchParams.get('q'), 'love');
-  assert.equal(searchParams.get('type'), 'track');
-  assert.equal(searchParams.get('market'), 'SI');
-  assert.equal(searchParams.get('limit'), '10');
-  assert.equal(searchParams.get('offset'), '120');
-});
-
-test('caches search pages per market, term and offset', async () => {
-  const { fetch, calls } = fakeFetch(routes([track('A', '1')]));
-  const catalog = spotify(CREDS, fetch);
-
-  await catalog.searchTracks('love', 0);
-  await catalog.searchTracks('love', 0, 'US');
-  await catalog.searchTracks('love', 10);
-  await catalog.searchTracks('night', 0);
-  await catalog.searchTracks('love', 0, 'SI');
-
-  assert.equal(searchRequests(calls).length, 4);
-});
-
-const SECOND_MS = 1000;
-const DAY_MS = 24 * 3600 * SECOND_MS;
-
-function rateLimitedOnce(host: string, headers: Record<string, string>): Route {
-  let limited = false;
-  return (url, init) => {
-    if (url.hostname === host && !limited) {
-      limited = true;
-      return new Response(null, { status: 429, headers });
-    }
-    return routes([track('Eagles', '1', 'Hotel California')])(url, init);
-  };
-}
-
-function quietErrors(t: TestContext) {
-  return t.mock.method(console, 'error', () => {});
-}
-
-for (const [host, label] of [
-  ['api.spotify.com', 'a search'],
-  ['accounts.spotify.com', 'a token request'],
-] as const) {
-  test(`sends nothing to Spotify for the Retry-After after ${label} gets HTTP 429`, async (t) => {
-    const errors = quietErrors(t);
-    const { fetch, calls } = fakeFetch(rateLimitedOnce(host, { 'Retry-After': '50985' }));
-    let clock = 0;
-    const catalog = spotify(CREDS, fetch, () => clock);
-    const hotel = { title: 'Hotel California', artist: 'Eagles' };
-
-    await assert.rejects(catalog.findTrackId(hotel), BusyError);
-    const sent = calls.length;
-    clock = 50_984 * SECOND_MS;
-    await assert.rejects(catalog.findTrackId(hotel), BusyError);
-    await assert.rejects(catalog.searchTracks('love', 0), BusyError);
-    assert.equal(calls.length, sent);
-
-    clock = 50_985 * SECOND_MS;
-    assert.equal(await catalog.findTrackId(hotel), '1');
-    assert.equal(errors.mock.callCount(), 1);
+  assert.deepEqual({ ...db.prepare("SELECT calls, recheck_calls FROM upstream WHERE service = 'spotify'").get() }, {
+    calls: 3,
+    recheck_calls: 2,
   });
-}
-
-for (const [label, headers, waitMs] of [
-  ['without Retry-After', {}, 30 * SECOND_MS],
-  ['for at most a day', { 'Retry-After': String((10 * DAY_MS) / SECOND_MS) }, DAY_MS],
-] as const) {
-  test(`backs off from Spotify ${label}`, async (t) => {
-    quietErrors(t);
-    const { fetch, calls } = fakeFetch(rateLimitedOnce('api.spotify.com', headers));
-    let clock = 0;
-    const catalog = spotify(CREDS, fetch, () => clock);
-
-    await assert.rejects(catalog.searchTracks('love', 0), BusyError);
-    clock = waitMs - 1;
-    await assert.rejects(catalog.searchTracks('love', 0), BusyError);
-    const sent = searchRequests(calls).length;
-    clock = waitMs;
-    await catalog.searchTracks('love', 0);
-
-    assert.equal(searchRequests(calls).length, sent + 1);
-  });
-}
-
-test('refuses Spotify calls beyond the call budget without sending them', async () => {
-  const { fetch, calls } = fakeFetch(routes([]));
-  let clock = 0;
-  const catalog = spotify(CREDS, fetch, () => clock);
-
-  const results = await Promise.allSettled(
-    Array.from({ length: 20 }, (_, i) => catalog.searchTracks(`term${i}`, 0)),
-  );
-  const refused = results.filter((r) => r.status === 'rejected' && r.reason instanceof BusyError);
-
-  assert.equal(calls.length, 10);
-  assert.equal(refused.length, 11);
-  clock = 2 * SECOND_MS;
-  await catalog.searchTracks('again', 0);
-  await assert.rejects(catalog.searchTracks('once more', 0), BusyError);
-  assert.equal(calls.length, 11);
 });

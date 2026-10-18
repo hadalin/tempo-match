@@ -5,6 +5,6 @@
   "license": "MIT",
   "type": "module",
   "dependencies": {
-    "@tempo-match/collector": "*"
+    "@tempo-match/catalog": "*"
   }
 }

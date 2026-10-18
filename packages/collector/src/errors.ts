@@ -1,21 +1,9 @@
-export class InvalidBpmError extends Error {
-  constructor(bpm: number, min: number, max: number) {
-    super(`BPM must be a whole number from ${min} to ${max}, got ${bpm}`);
-    this.name = 'InvalidBpmError';
-  }
-}
-
-export class NoMatchError extends Error {
-  constructor(bpm: number) {
-    super(`No song at ${bpm} BPM could be found on Spotify`);
-    this.name = 'NoMatchError';
-  }
-}
-
 export class UpstreamError extends Error {
-  constructor(service: string, failure: number | Error) {
+  constructor(service: string, failure: number | Error | string) {
     if (typeof failure === 'number') {
       super(`${service} request failed with HTTP ${failure}`);
+    } else if (typeof failure === 'string') {
+      super(`${service} request failed: ${failure}`);
     } else {
       super(`${service} request failed: ${failure.message}`, { cause: failure });
     }
@@ -23,11 +11,50 @@ export class UpstreamError extends Error {
   }
 }
 
-/** Thrown instead of calling a service that rate-limited us, or whose call budget is spent. */
-export class BusyError extends Error {
-  constructor(service: string) {
-    super(`${service} is busy, try again later`);
-    this.name = 'BusyError';
+/** A network error, a timeout, a 5xx or a quota error: retried after a growing back-off. */
+export class UnavailableError extends UpstreamError {
+  constructor(service: string, failure: number | Error | string) {
+    super(service, failure);
+    this.name = 'UnavailableError';
+  }
+}
+
+export class RateLimitedError extends UpstreamError {
+  readonly retryAfter: string | null;
+
+  constructor(service: string, retryAfter: string | null) {
+    super(service, 429);
+    this.retryAfter = retryAfter;
+    this.name = 'RateLimitedError';
+  }
+}
+
+/** 401 or 403: no call until an operator unblocks the service. */
+export class UnauthorizedError extends UpstreamError {
+  constructor(service: string, status: number) {
+    super(service, status);
+    this.name = 'UnauthorizedError';
+  }
+}
+
+/** A response the collector cannot trust: no call until an operator unblocks the service. */
+export const RESPONSE_FORMAT = 'response format';
+
+export class ResponseFormatError extends UpstreamError {
+  constructor(service: string, problem: string) {
+    super(service, `${RESPONSE_FORMAT}: ${problem}`);
+    this.name = 'ResponseFormatError';
+  }
+}
+
+/** Thrown instead of a call while the service is banned, held or out of its daily calls. */
+export class RefusedError extends Error {
+  readonly until: number;
+
+  constructor(service: string, until: number, reason: string) {
+    super(`${service} calls refused until ${new Date(until).toISOString()}: ${reason}`);
+    this.until = until;
+    this.name = 'RefusedError';
   }
 }
 
@@ -38,16 +65,12 @@ export class MissingConfigError extends Error {
   }
 }
 
-export class NoLuckyPickError extends Error {
-  constructor() {
-    super("Couldn't find a random song, try again");
-    this.name = 'NoLuckyPickError';
-  }
-}
-
-export class LuckyDisabledError extends Error {
-  constructor() {
-    super("Autoplay random is turned off on this server");
-    this.name = 'LuckyDisabledError';
-  }
+/**
+ * Whether a call that failed this way can succeed later: the dispatcher stored a ban or a hold,
+ * or refused to send. Other failures, such as a 400, would repeat on every attempt.
+ */
+export function retriesLater(err: unknown): boolean {
+  return [RefusedError, RateLimitedError, UnavailableError, UnauthorizedError, ResponseFormatError].some(
+    (type) => err instanceof type,
+  );
 }

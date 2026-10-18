@@ -1,59 +1,44 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { connect, type AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import {
-  BusyError,
-  InvalidBpmError,
-  LuckyDisabledError,
-  NoLuckyPickError,
-  NoMatchError,
-  UpstreamError,
-  type TempoEngine,
-} from '@tempo-match/collector';
+import { identityOf, openWriter, SOURCE_GETSONGBPM, transitions } from '@tempo-match/catalog';
 import { contentVersion } from '../src/asset-version.ts';
-import { webServer } from '../src/server.ts';
+import { catalogReader, type CatalogReader } from '../src/catalog-reader.ts';
+import { counters, flags } from '../src/flags.ts';
+import { matcherServer } from '../src/server.ts';
 
-const SONG = { title: 'Song', artist: 'Artist', bpm: 120, spotifyTrackId: '1' };
-const LUCKY_SONG = { title: 'Lucky', artist: 'Artist', bpm: 97, spotifyTrackId: '2' };
+const A = 'A'.repeat(22);
+const B = 'B'.repeat(22);
+const LUCKY = 'L'.repeat(22);
+const NOW = Date.UTC(2026, 9, 18, 12);
+const SONGS = [
+  { title: 'Song', bpm: 120, id: A },
+  { title: 'Other', bpm: 120, id: B },
+  { title: 'Lucky', bpm: 97, id: LUCKY },
+];
 
-const markets: (string | undefined)[] = [];
-const excludes: (number | undefined)[] = [];
-let luck: Error | null = null;
+const dir = mkdtempSync(join(tmpdir(), 'matcher-'));
+const path = join(dir, 'catalog.db');
+const writer = openWriter(path);
+const t = transitions(writer);
+for (const { title, bpm, id } of SONGS) {
+  const identity = identityOf(title, 'Artist');
+  t.upsertListings([{ identity, bpm, title, artist: 'Artist', popularity: 0.5, source: SOURCE_GETSONGBPM }], NOW);
+  t.applyLookup('US', identity, id, NOW);
+}
 
-const engine: TempoEngine = {
-  async matchSong(bpm, market) {
-    markets.push(market);
-    if (bpm === 120) {
-      return SONG;
-    }
-    if (bpm === 41) {
-      throw new NoMatchError(bpm);
-    }
-    if (bpm === 99) {
-      throw new UpstreamError('Spotify search', 503);
-    }
-    if (bpm === 98) {
-      throw new BusyError('Spotify');
-    }
-    throw new InvalidBpmError(bpm, 40, 220);
-  },
-  async luckySong(market, excludeBpm) {
-    markets.push(market);
-    excludes.push(excludeBpm);
-    if (luck) {
-      throw luck;
-    }
-    return LUCKY_SONG;
-  },
-};
+const reader = catalogReader(path);
+const flagged = flags();
+const counted = counters();
+const server = matcherServer({ catalog: reader, market: 'US', flags: flagged, counters: counted, now: () => NOW });
+let base = '';
 
 function versionOf(file: string): string {
   return contentVersion(readFileSync(new URL(`../public/${file}`, import.meta.url)));
 }
-
-const server = webServer(engine);
-let base = '';
 
 function rawStatusLine(target: string): Promise<string> {
   const { port } = server.address() as AddressInfo;
@@ -70,6 +55,18 @@ function rawStatusLine(target: string): Promise<string> {
   });
 }
 
+async function song(query: string, headers: Record<string, string> = {}) {
+  const res = await fetch(`${base}/api/song?${query}`, { headers });
+  return { res, body: await res.json() };
+}
+
+async function listen(options: Parameters<typeof matcherServer>[0]): Promise<string> {
+  const other = matcherServer(options);
+  await new Promise<void>((resolve) => other.listen(0, resolve));
+  after(() => other.close());
+  return `http://localhost:${(other.address() as AddressInfo).port}`;
+}
+
 before(async () => {
   await new Promise<void>((resolve) => server.listen(0, resolve));
   base = `http://localhost:${(server.address() as AddressInfo).port}`;
@@ -77,6 +74,9 @@ before(async () => {
 
 after(() => {
   server.close();
+  reader.close();
+  writer.close();
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test('serves the page', async () => {
@@ -166,8 +166,6 @@ for (const path of ['/', '/privacy', '/terms', '/app.js', '/theme.css', '/favico
 
 for (const path of ['/api/song?bpm=120', '/api/song?bpm=abc', '/api/song?lucky=1', '/api/missing']) {
   test(`forbids caching ${path}`, async () => {
-    luck = null;
-
     const res = await fetch(`${base}${path}`);
 
     assert.equal(res.headers.get('cache-control'), 'no-store');
@@ -240,40 +238,49 @@ test('links GetSongBPM and names every data source on the terms and privacy page
   }
 });
 
-test('returns the matched song', async () => {
-  const res = await fetch(`${base}/api/song?bpm=120`);
+test('returns a stored song at the BPM with the listing title', async () => {
+  const { res, body } = await song('bpm=120');
 
   assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), SONG);
+  const match = SONGS.find((s) => s.id === body.spotifyTrackId);
+  assert.deepEqual(body, { title: match?.title, artist: 'Artist', bpm: 120, spotifyTrackId: match?.id });
 });
 
-const COUNTRY_CASES = [
-  ['SI', 'SI'],
-  ['si', 'SI'],
-  ['XX', undefined],
-  ['T1', undefined],
-  ['S1', undefined],
-  ['USA', undefined],
-  ['', undefined],
-  [null, undefined],
-] as const;
+test('never serves the skipped song', async () => {
+  for (let i = 0; i < 10; i++) {
+    assert.equal((await song(`bpm=120&skip=${A}`)).body.spotifyTrackId, B);
+  }
+});
 
-for (const [country, market] of COUNTRY_CASES) {
-  test(`searches CF-IPCountry ${country} in market ${market}`, async () => {
+test('answers 503 with Retry-After at an empty BPM of 60-210, never another BPM', async () => {
+  const { res, body } = await song(`bpm=120&skip=${A}&dead=${B}`);
+  const empty = await song('bpm=121');
+
+  assert.equal(res.status, 503);
+  assert.equal(res.headers.get('retry-after'), '60');
+  assert.deepEqual(body, { error: 'No song at 120 BPM right now, try again in a minute' });
+  assert.equal(empty.res.status, 503);
+});
+
+test('answers 404 at an empty BPM outside 60-210', async () => {
+  const { res, body } = await song('bpm=41');
+
+  assert.equal(res.status, 404);
+  assert.deepEqual(body, { error: 'No song at 41 BPM yet' });
+});
+
+for (const country of ['US', 'SI', 'XX', 'T1', null]) {
+  test(`serves the US picks to CF-IPCountry ${country}`, async () => {
     const headers: Record<string, string> = country === null ? {} : { 'CF-IPCountry': country };
-    markets.length = 0;
 
-    await fetch(`${base}/api/song?bpm=120`, { headers });
-
-    assert.deepEqual(markets, [market]);
+    assert.equal((await song(`bpm=97`, headers)).body.spotifyTrackId, LUCKY);
   });
 }
 
 for (const [bpm, status] of [
   ['abc', 400],
-  ['41', 404],
-  ['99', 502],
-  ['98', 503],
+  ['39', 400],
+  ['221', 400],
   ['120.0', 400],
   ['0x78', 400],
   ['1e2', 400],
@@ -281,10 +288,10 @@ for (const [bpm, status] of [
   ['%20120', 400],
 ] as const) {
   test(`maps bpm=${bpm} to HTTP ${status}`, async () => {
-    const res = await fetch(`${base}/api/song?bpm=${bpm}`);
+    const { res, body } = await song(`bpm=${bpm}`);
 
     assert.equal(res.status, status);
-    assert.equal(typeof (await res.json()).error, 'string');
+    assert.equal(typeof body.error, 'string');
   });
 }
 
@@ -295,69 +302,107 @@ for (const target of ['//', '//[']) {
   });
 }
 
-test('returns a lucky song for lucky=1 in the visitor market', async () => {
-  luck = null;
-  markets.length = 0;
+test('counts songs served to the market, to other countries and empty answers', async () => {
+  counted.take();
 
-  const res = await fetch(`${base}/api/song?lucky=1`, { headers: { 'CF-IPCountry': 'SI' } });
+  await song('bpm=120', { 'CF-IPCountry': 'US' });
+  await song('bpm=120', { 'CF-IPCountry': 'SI' });
+  await song('bpm=121', { 'CF-IPCountry': 'SI' });
 
-  assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), LUCKY_SONG);
-  assert.deepEqual(markets, ['SI']);
+  assert.deepEqual(counted.take(), {
+    US: { served: 1, fallback: 0, empty: 0, dead: 0 },
+    SI: { served: 0, fallback: 1, empty: 1, dead: 0 },
+  });
 });
 
-test('ignores bpm on a lucky request', async () => {
-  luck = null;
+test('three IP prefixes in the market flagging a pick make it a suspect', async () => {
+  for (const ip of ['192.0.2.1', '192.0.2.2', '198.51.100.1', '2001:db8:1::1']) {
+    const { body } = await song(`bpm=120&dead=${A}`, { 'CF-IPCountry': 'US', 'CF-Connecting-IP': ip });
+    assert.equal(body.spotifyTrackId, B);
+  }
 
-  const res = await fetch(`${base}/api/song?lucky=1&bpm=120`);
-
-  assert.deepEqual(await res.json(), LUCKY_SONG);
+  assert.deepEqual(flagged.suspects(NOW), [A]);
 });
 
-test('passes a valid exclude BPM to a lucky pick', async () => {
-  luck = null;
-  excludes.length = 0;
+test('a flag from another country is counted but never makes a suspect', async () => {
+  counted.take();
 
-  await fetch(`${base}/api/song?lucky=1&exclude=120`);
+  for (const ip of ['203.0.113.1', '203.0.114.1', '203.0.115.1']) {
+    await song(`bpm=97&dead=${LUCKY}`, { 'CF-IPCountry': 'SI', 'CF-Connecting-IP': ip });
+  }
 
-  assert.deepEqual(excludes, [120]);
+  assert.equal(counted.take().SI.dead, 3);
+  assert.ok(!flagged.suspects(NOW).includes(LUCKY));
 });
 
-for (const exclude of ['', 'abc', '120.5', '39', '221', '1e2', '120.0', '0x78', '%2B120']) {
-  test(`ignores an invalid exclude of "${exclude}"`, async () => {
-    luck = null;
-    excludes.length = 0;
+test('ignores a dead id that is malformed or not a pick', async () => {
+  counted.take();
 
-    const res = await fetch(`${base}/api/song?lucky=1&exclude=${exclude}`);
+  await song(`bpm=120&dead=short`, { 'CF-IPCountry': 'US' });
+  await song(`bpm=120&dead=${'Z'.repeat(22)}`, { 'CF-IPCountry': 'US' });
+
+  assert.equal(counted.take().US.dead, 0);
+});
+
+test('a lucky request returns a pick at another BPM', async () => {
+  for (let i = 0; i < 10; i++) {
+    assert.equal((await song('lucky=1&exclude=120')).body.spotifyTrackId, LUCKY);
+  }
+});
+
+test('a lucky request ignores bpm, skips the given song and answers 404 when nothing is left', async () => {
+  const { res, body } = await song(`lucky=1&bpm=120&exclude=120&skip=${LUCKY}`);
+
+  assert.equal(res.status, 404);
+  assert.deepEqual(body, { error: 'No song found, try again later' });
+});
+
+for (const exclude of ['', 'abc', '120.5', '39', '221', '1e2', '0x78']) {
+  test(`a lucky request ignores an invalid exclude of "${exclude}"`, async () => {
+    const { res } = await song(`lucky=1&exclude=${exclude}&skip=${LUCKY}`);
 
     assert.equal(res.status, 200);
-    assert.deepEqual(excludes, [undefined]);
   });
 }
 
 test('treats a lucky value other than 1 as a normal search', async () => {
-  const res = await fetch(`${base}/api/song?lucky=yes`);
-
-  assert.equal(res.status, 400);
+  assert.equal((await song('lucky=yes')).res.status, 400);
 });
 
-for (const [label, error, status, message] of [
-  ['finds nothing', new NoLuckyPickError(), 404, "Couldn't find a random song, try again"],
-  ['is turned off', new LuckyDisabledError(), 503, "Autoplay random is turned off on this server"],
-  [
-    'hits a failing service',
-    new UpstreamError('ReccoBeats', 503),
-    502,
-    'A music service is unavailable, try again later',
-  ],
-  ['finds Spotify busy', new BusyError('Spotify'), 503, 'Spotify is busy, try again later'],
-] as const) {
-  test(`answers HTTP ${status} when lucky ${label}`, async () => {
-    luck = error;
+test('reports picks and the oldest pick age on /healthz', async () => {
+  const res = await fetch(`${base}/healthz`);
 
-    const res = await fetch(`${base}/api/song?lucky=1`);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { market: 'US', picks: 3, oldestPickDays: 0 });
+});
 
-    assert.equal(res.status, status);
-    assert.deepEqual(await res.json(), { error: message });
-  });
-}
+test('answers 503 while the catalog does not exist yet', async (t) => {
+  const missing = catalogReader(join(dir, 'missing.db'));
+  t.mock.method(console, 'error', () => {});
+  const other = await listen({ catalog: missing, market: 'US', flags: flags(), counters: counters() });
+  t.after(() => missing.close());
+
+  const api = await fetch(`${other}/api/song?bpm=120`);
+  assert.equal(api.status, 503);
+  assert.deepEqual(await api.json(), { error: 'Warming up, try again in a minute' });
+  assert.equal((await fetch(`${other}/healthz`)).status, 503);
+  assert.equal((await fetch(`${other}/`)).status, 200);
+});
+
+test('answers 503 with a short Retry-After while the database is busy', async () => {
+  const busy = Object.assign(new Error('database is locked'), { errcode: 5 });
+  const queries = { songAt: () => { throw busy; }, lucky: () => null, isPick: () => false, summary: () => ({ picks: 0, oldestLookedUpAt: null }) };
+  const catalog: CatalogReader = { queries: () => queries, close() {} };
+  const other = await listen({ catalog, market: 'US', flags: flags(), counters: counters() });
+
+  const res = await fetch(`${other}/api/song?bpm=120`);
+
+  assert.equal(res.status, 503);
+  assert.equal(res.headers.get('retry-after'), '1');
+});
+
+test('depends only on the catalog, so it cannot import an upstream client', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+
+  assert.deepEqual(manifest.dependencies, { '@tempo-match/catalog': '*' });
+});

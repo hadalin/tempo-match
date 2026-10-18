@@ -33,3 +33,13 @@ export {
   UNTIL_UNBLOCKED,
   type Service,
 } from './schema.ts';
+export {
+  isTrackId,
+  MAX_REPORT_BYTES,
+  MAX_SUSPECTS,
+  parseReport,
+  type Counter,
+  type CountryCounts,
+  type Report,
+  type Suspect,
+} from './report.ts';

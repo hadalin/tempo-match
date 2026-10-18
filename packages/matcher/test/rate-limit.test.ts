@@ -1,23 +1,28 @@
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
-import type { TempoEngine } from '@tempo-match/collector';
+import type { MatcherQueries } from '@tempo-match/catalog';
+import { counters, flags } from '../src/flags.ts';
 import { fixedWindow, InvalidRateLimitError, parseRateLimit } from '../src/rate-limit.ts';
-import { webServer } from '../src/server.ts';
+import { matcherServer } from '../src/server.ts';
 
-const SONG = { title: 'Song', artist: 'Artist', bpm: 120, spotifyTrackId: '1' };
+const SONG = { title: 'Song', artist: 'Artist', bpm: 120, spotifyTrackId: 'A'.repeat(22) };
 
-const engine: TempoEngine = {
-  async matchSong() {
-    return SONG;
-  },
-  async luckySong() {
-    return SONG;
-  },
+const queries: MatcherQueries = {
+  songAt: () => SONG,
+  lucky: () => SONG,
+  isPick: () => false,
+  summary: () => ({ picks: 1, oldestLookedUpAt: 0 }),
 };
 
 let now = 0;
-const server = webServer(engine, fixedWindow({ count: 2, windowSeconds: 10 }, () => now));
+const server = matcherServer({
+  catalog: { queries: () => queries, close() {} },
+  market: 'US',
+  flags: flags(),
+  counters: counters(),
+  rateLimiter: fixedWindow({ count: 2, windowSeconds: 10 }, () => now),
+});
 let base = '';
 
 before(async () => {
