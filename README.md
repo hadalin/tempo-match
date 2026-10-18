@@ -31,11 +31,6 @@ npm run dev        # the matcher, restarting on changes under packages/
 npm run admin -- status
 ```
 
-The matcher answers 503 until the collector has created `catalog.db`, and each tempo once its first song is in.
-
-To try the rate-limit countdown locally, allow 3 requests per 20 seconds,
-then tap Find a song 4 times: `SIMULATE_RATE_LIMIT=3/20 npm start`.
-
 ## Test
 
 ```sh
