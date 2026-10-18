@@ -38,6 +38,9 @@ const TOOLTIP_AFTER_TAP_MS = 1500;
 const TOOLTIP = 'tooltip';
 const TOOLTIP_SHOWN = 'tooltip shown';
 const AUTOPLAY_UNAVAILABLE_NOTE = 'Autoplay unavailable right now';
+const DEAD_SONG_NOTE = "This song won't play here, finding another";
+const NO_PLAYABLE_SONG_NOTE = "Songs won't play here right now";
+const MAX_REPLACEMENTS = 2;
 const PLAY_BLOCKED_NOTE = 'Tap play to start the next song';
 const LOOP_ICON_PATH = 'M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3';
 const DIE_ICON_PATH = 'M10 8.5h4a1.5 1.5 0 0 1 1.5 1.5v4a1.5 1.5 0 0 1-1.5 1.5h-4a1.5 1.5 0 0 1-1.5-1.5v-4a1.5 1.5 0 0 1 1.5-1.5zM9.75 10.75a1 1 0 1 0 2 0a1 1 0 1 0-2 0zM12.25 13.25a1 1 0 1 0 2 0a1 1 0 1 0-2 0z';
@@ -49,6 +52,11 @@ const previewOnlyDevice = iosDevice();
 let autoplay = savedAutoplay();
 let autoplayUnavailable = false;
 let playback = null;
+let shown = null;
+// An unknown or taken-down track shows Spotify's "Page not found" and never says it is ready, but neither does any embed
+// where frames are blocked. So a silent embed counts as a dead song only once an earlier one said it was ready.
+let embedsWork = false;
+let replacements = 0;
 let autoplayAnnouncement = null;
 let tooltipTimer;
 
@@ -92,7 +100,9 @@ form.addEventListener('submit', async (event) => {
   }
 
   setBpm(enteredBpm());
-  const song = await search(`/api/song?bpm=${slider.value}`);
+  replacements = 0;
+  const again = shown?.bpm === Number(slider.value) ? skipParam(shown) : '';
+  const song = await search(`/api/song?bpm=${slider.value}${again}`);
   if (song && autoplay !== AUTOPLAY_OFF && !autoplayUnavailable) {
     playback.play();
   }
@@ -108,8 +118,8 @@ autoplayButton.addEventListener('click', () => {
 autoplayButton.addEventListener('mouseleave', hideTooltip);
 autoplayButton.addEventListener('blur', hideTooltip);
 
-async function randomSong() {
-  const song = await search(`/api/song?lucky=1&exclude=${slider.value}`);
+async function randomSong(extra, notice) {
+  const song = await search(`/api/song?lucky=1&exclude=${slider.value}${extra}`, notice);
   if (song) {
     setBpm(song.bpm);
   }
@@ -121,20 +131,48 @@ async function playNext() {
     return;
   }
 
-  const song = autoplay === AUTOPLAY_RANDOM_TEMPO ? await randomSong() : await search(`/api/song?bpm=${slider.value}`);
+  const ended = skipParam(shown);
+  const song = autoplay === AUTOPLAY_RANDOM_TEMPO ? await randomSong(ended) : await search(`/api/song?bpm=${slider.value}${ended}`);
   if (song) {
     playback.play();
   }
 }
 
-async function search(url) {
+async function replaceDeadSong(dead, card) {
+  if (replacements >= MAX_REPLACEMENTS) {
+    card.append(autoplayNote(NO_PLAYABLE_SONG_NOTE));
+    return;
+  }
+
+  replacements++;
+  const flag = `&dead=${dead.spotifyTrackId}`;
+  const song = dead.lucky
+    ? await randomSong(flag, DEAD_SONG_NOTE)
+    : await search(`/api/song?bpm=${slider.value}${flag}`, DEAD_SONG_NOTE);
+  if (song && autoplay !== AUTOPLAY_OFF && !autoplayUnavailable) {
+    playback.play();
+  }
+}
+
+function skipParam(song) {
+  return song ? `&skip=${song.spotifyTrackId}` : '';
+}
+
+async function search(url, notice) {
   disableSearch();
   playback?.stop();
   playback = null;
+  shown = null;
   result.replaceChildren();
+  const pending = document.createElement('p');
+  if (notice) {
+    pending.textContent = notice;
+    result.append(pending);
+  }
   let song;
   try {
     const res = await fetch(url);
+    pending.remove();
     if (res.status === TOO_MANY_REQUESTS) {
       startCooldown(retrySeconds(res.headers.get('Retry-After')));
       return;
@@ -143,10 +181,11 @@ async function search(url) {
     const body = await res.json();
     if (!res.ok) {
       showError(body.error);
-    } else if (showSong(body)) {
+    } else if (showSong(body, url.includes('lucky=1'))) {
       song = body;
     }
   } catch {
+    pending.remove();
     showError('Could not reach the server');
   }
   enableSearch();
@@ -205,7 +244,7 @@ function startCooldown(seconds) {
   tick();
 }
 
-function showSong(song) {
+function showSong(song, lucky) {
   const trackId = song.spotifyTrackId;
   if (!SPOTIFY_ID.test(trackId)) {
     showError('Spotify returned an unexpected track');
@@ -247,17 +286,32 @@ function showSong(song) {
     card.append(autoplayNote(AUTOPLAY_UNAVAILABLE_NOTE));
   }
   result.append(card);
+  const current = { ...song, lucky };
+  shown = current;
 
   playback = watchSpotifyEmbed(embed, {
+    ready: () => {
+      embedsWork = true;
+      replacements = 0;
+    },
     ended: playNext,
     blocked: () => { card.append(autoplayNote(PLAY_BLOCKED_NOTE)); },
-    unavailable: () => {
-      autoplayUnavailable = true;
-      autoplayButton.disabled = true;
-      card.append(autoplayNote(AUTOPLAY_UNAVAILABLE_NOTE));
+    silent: () => {
+      if (embedsWork) {
+        replaceDeadSong(current, card);
+      } else {
+        stopAutoplay(card);
+      }
     },
+    unavailable: () => stopAutoplay(card),
   });
   return true;
+}
+
+function stopAutoplay(card) {
+  autoplayUnavailable = true;
+  autoplayButton.disabled = true;
+  card.append(autoplayNote(AUTOPLAY_UNAVAILABLE_NOTE));
 }
 
 function showAutoplay() {

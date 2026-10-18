@@ -455,7 +455,7 @@ for (const [kind, duration] of [['preview', PREVIEW_MS], ['full track', FULL_TRA
     await settle();
 
     assert.equal(fetch.mock.callCount(), 2);
-    assert.equal(fetch.mock.calls[1].arguments[0], '/api/song?bpm=120');
+    assert.equal(fetch.mock.calls[1].arguments[0], '/api/song?bpm=120&skip=1');
   });
 }
 
@@ -517,7 +517,7 @@ test('picks a random song and tempo when a song ends with random-tempo autoplay'
   playOut(app);
   await settle();
 
-  assert.equal(fetch.mock.calls[1].arguments[0], '/api/song?lucky=1&exclude=120');
+  assert.equal(fetch.mock.calls[1].arguments[0], '/api/song?lucky=1&exclude=120&skip=1');
   assert.equal(String(app.slider.value), '97');
   assert.match(card(app.result).textContent, /Lucky.*Artist · 97 BPM/);
 });
@@ -717,4 +717,114 @@ test('waits for the embed ready message after it loads', async () => {
 
   assert.deepEqual(autoplayNotes(app.result), []);
   assert.equal(app.autoplay.disabled, false);
+});
+
+test('asks for another song when Find is pressed again at the shown tempo', async () => {
+  const fetch = mock.fn(async (_: string) => Response.json(SONG));
+  const app = loadApp(fetch);
+  await app.form.dispatch('submit');
+  await app.form.dispatch('submit');
+  app.value.value = '121';
+  await app.value.dispatch('change');
+  await app.form.dispatch('submit');
+
+  assert.deepEqual(fetch.mock.calls.map((call) => call.arguments[0]), [
+    '/api/song?bpm=120',
+    '/api/song?bpm=120&skip=1',
+    '/api/song?bpm=121',
+  ]);
+});
+
+async function silentEmbedAfterWorkingOne(fetch: (url: string) => Promise<Response>) {
+  const app = loadApp(fetch);
+  await app.form.dispatch('submit');
+  emit(app, { type: 'ready' });
+  await app.form.dispatch('submit');
+  await embed(app.result).dispatch('load');
+  return app;
+}
+
+test('replaces a song whose embed stays silent once an earlier embed worked, flagging it', async () => {
+  const fetch = mock.fn(async (_: string) => Response.json(SONG));
+  const app = await silentEmbedAfterWorkingOne(fetch);
+  await cycleTo(app, 1);
+
+  mock.timers.tick(READY_TIMEOUT_MS);
+  assert.equal(app.result.textContent, "This song won't play here, finding another");
+  await settle();
+
+  assert.equal(fetch.mock.calls.at(-1)?.arguments[0], '/api/song?bpm=120&dead=1');
+  assert.equal(app.autoplay.disabled, false);
+  emit(app, { type: 'ready' });
+  assert.deepEqual(commands(embed(app.result)), ['load_complete_ack', 'play']);
+});
+
+test('replaces a silent lucky song with another lucky song', async () => {
+  const fetch = mock.fn(async (url: string) => Response.json(url.includes('lucky') ? LUCKY_SONG : SONG));
+  const app = loadApp(fetch);
+  await app.form.dispatch('submit');
+  await cycleTo(app, 2);
+  playOut(app);
+  await settle();
+
+  await embed(app.result).dispatch('load');
+  mock.timers.tick(READY_TIMEOUT_MS);
+  await settle();
+
+  assert.equal(fetch.mock.calls.at(-1)?.arguments[0], '/api/song?lucky=1&exclude=97&dead=2');
+});
+
+test('turns autoplay off quietly, without a replacement, when no embed has worked yet', async () => {
+  const fetch = mock.fn(async (_: string) => Response.json(SONG));
+  const app = loadApp(fetch);
+  await app.form.dispatch('submit');
+
+  await embed(app.result).dispatch('load');
+  mock.timers.tick(READY_TIMEOUT_MS);
+  await settle();
+
+  assert.equal(fetch.mock.callCount(), 1);
+  assert.deepEqual(autoplayNotes(app.result), ['Autoplay unavailable right now']);
+});
+
+test('stops after two replacements in a row and says songs will not play', async () => {
+  const fetch = mock.fn(async (_: string) => Response.json(SONG));
+  const app = await silentEmbedAfterWorkingOne(fetch);
+
+  for (let replacement = 0; replacement < 2; replacement++) {
+    mock.timers.tick(READY_TIMEOUT_MS);
+    await settle();
+    await embed(app.result).dispatch('load');
+  }
+  mock.timers.tick(READY_TIMEOUT_MS);
+  await settle();
+
+  assert.equal(fetch.mock.callCount(), 4);
+  assert.deepEqual(autoplayNotes(app.result), ["Songs won't play here right now"]);
+});
+
+test('a working embed allows two more replacements', async () => {
+  const fetch = mock.fn(async (_: string) => Response.json(SONG));
+  const app = await silentEmbedAfterWorkingOne(fetch);
+  mock.timers.tick(READY_TIMEOUT_MS);
+  await settle();
+  await embed(app.result).dispatch('load');
+  emit(app, { type: 'ready' });
+
+  await app.form.dispatch('submit');
+  await embed(app.result).dispatch('load');
+  mock.timers.tick(READY_TIMEOUT_MS);
+  await settle();
+
+  assert.equal(fetch.mock.calls.at(-1)?.arguments[0], '/api/song?bpm=120&dead=1');
+});
+
+test('shows an empty tempo message and keeps Find a song enabled', async () => {
+  const message = 'No song at 150 BPM right now, try again in a minute';
+  const app = loadApp(async () => Response.json({ error: message }, { status: 503, headers: { 'Retry-After': '60' } }));
+
+  await app.form.dispatch('submit');
+
+  assert.equal(app.result.textContent, message);
+  assert.equal(app.submit.disabled, false);
 });

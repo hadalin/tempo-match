@@ -6,8 +6,9 @@ const EMBED_PLAY_TIMEOUT_MS = 5000;
 const FINAL_STEP_MAX_MS = 2500;
 
 /**
- * Watches one Spotify embed iframe. Calls on.ended once when its track plays out (not on a pause or a seek to the end),
- * on.blocked when play() starts no playback, and on.unavailable once when the embed stops speaking the expected protocol.
+ * Watches one Spotify embed iframe. Calls on.ready when the embed says it is ready, on.ended once when its track plays out
+ * (not on a pause or a seek to the end), on.blocked when play() starts no playback, on.silent once when the embed never
+ * says it is ready, and on.unavailable once when it stops speaking the expected protocol.
  */
 function watchSpotifyEmbed(iframe, on) {
   let ready = false;
@@ -36,10 +37,16 @@ function watchSpotifyEmbed(iframe, on) {
     playTimer = setTimeout(on.blocked, EMBED_PLAY_TIMEOUT_MS);
   };
 
+  const silent = () => {
+    stop();
+    on.silent();
+  };
+
   const onReady = () => {
     ready = true;
     clearTimeout(readyTimer);
     send('load_complete_ack');
+    on.ready();
     if (wantsPlay) {
       startPlay();
     }
@@ -78,7 +85,7 @@ function watchSpotifyEmbed(iframe, on) {
   window.addEventListener('message', receive);
   iframe.addEventListener('load', () => {
     if (!ready) {
-      readyTimer = setTimeout(fail, EMBED_READY_TIMEOUT_MS);
+      readyTimer = setTimeout(silent, EMBED_READY_TIMEOUT_MS);
     }
   });
 
