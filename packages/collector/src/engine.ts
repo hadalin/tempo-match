@@ -5,7 +5,7 @@ import {
   NoLuckyPickError,
   NoMatchError,
 } from './errors.ts';
-import { normalize, normalizeTitle } from './normalize.ts';
+import { normalize, normalizeTitle } from '@tempo-match/catalog';
 import type { SongProvider, TempoSong } from './provider.ts';
 import { PAGE_LIMIT, type CatalogTrack, type TrackCatalog } from './spotify.ts';
 import { memorySongStore, type Rejection, type Resolution, type SongStore } from './store.ts';

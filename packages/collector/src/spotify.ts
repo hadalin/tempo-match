@@ -1,7 +1,7 @@
 import { tokenBucket } from './budget.ts';
 import { DAY_MS, ttlCache } from './cache.ts';
 import { BusyError, UpstreamError } from './errors.ts';
-import { normalize, normalizeTitle } from './normalize.ts';
+import { normalize, normalizeTitle } from '@tempo-match/catalog';
 import type { TempoSong } from './provider.ts';
 import { fetchUpstream, retryAfterMs, SECOND_MS } from './upstream.ts';
 
