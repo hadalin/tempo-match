@@ -67,6 +67,7 @@ then tap Find a song 4 times: `SIMULATE_RATE_LIMIT=3/20 npm start`.
 ```sh
 npm test
 npm run typecheck
+npm run bench -- 200 60 mixed   # matcher load: requests per second, seconds, mixed or lucky; no upstream calls
 ```
 
 ## Self-hosting

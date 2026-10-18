@@ -14,6 +14,7 @@
     "start": "node --env-file-if-exists=.env packages/matcher/src/main.ts",
     "collect": "node --env-file-if-exists=.env packages/collector/src/main.ts",
     "admin": "node --env-file-if-exists=.env packages/collector/src/admin.ts",
+    "bench": "node --no-warnings packages/matcher/bench/load.ts",
     "test": "node --test \"packages/*/test/**/*.test.ts\"",
     "typecheck": "tsc"
   },
