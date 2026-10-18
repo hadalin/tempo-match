@@ -1,7 +1,7 @@
 FROM node:24-alpine
 
 ENV NODE_ENV=production
-ENV SONG_STORE_PATH=/data/songs.db
+ENV DATA_DIR=/data
 WORKDIR /app
 
 COPY package.json package-lock.json ./

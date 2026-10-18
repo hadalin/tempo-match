@@ -19,3 +19,8 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run typecheck
+      - run: docker compose config -q
+        env:
+          GETSONGBPM_API_KEY: ci
+          SPOTIFY_CLIENT_ID: ci
+          SPOTIFY_CLIENT_SECRET: ci

@@ -1,10 +1,29 @@
+x-app: &app
+  build: .
+  image: tempo-match:local
+  init: true
+  restart: unless-stopped
+  volumes:
+    - songs:/data
+
 services:
-  tempo-match:
-    build: .
-    init: true
-    restart: unless-stopped
+  matcher:
+    <<: *app
+    command: ["node", "packages/matcher/src/main.ts"]
     ports:
       - "127.0.0.1:8095:3000"
+    environment:
+      SPOTIFY_MARKET: ${SPOTIFY_MARKET:-}
+      COLLECTOR_URL: http://collector:3001
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  collector:
+    <<: *app
+    command: ["node", "packages/collector/src/main.ts"]
     environment:
       GETSONGBPM_API_KEY: ${GETSONGBPM_API_KEY:?}
       SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:?}
@@ -12,10 +31,8 @@ services:
       SPOTIFY_MARKET: ${SPOTIFY_MARKET:-}
       DEEZER_ENABLED: ${DEEZER_ENABLED:-}
       RECCOBEATS_ENABLED: ${RECCOBEATS_ENABLED:-}
-    volumes:
-      - songs:/data
     healthcheck:
-      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3000/"]
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3001/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
