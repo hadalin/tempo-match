@@ -11,4 +11,4 @@ RUN mkdir /data && chown node:node /data
 
 USER node
 EXPOSE 3000
-CMD ["node", "packages/web/src/main.ts"]
+CMD ["node", "packages/matcher/src/main.ts"]

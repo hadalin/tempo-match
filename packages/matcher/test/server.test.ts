@@ -10,7 +10,7 @@ import {
   NoMatchError,
   UpstreamError,
   type TempoEngine,
-} from '@tempo-match/engine';
+} from '@tempo-match/collector';
 import { contentVersion } from '../src/asset-version.ts';
 import { webServer } from '../src/server.ts';
 

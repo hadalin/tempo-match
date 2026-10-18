@@ -1,5 +1,5 @@
 {
-  "name": "@tempo-match/engine",
+  "name": "@tempo-match/collector",
   "version": "0.1.0",
   "private": true,
   "license": "MIT",

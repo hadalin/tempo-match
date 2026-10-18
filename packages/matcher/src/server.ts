@@ -11,7 +11,7 @@ import {
   UpstreamError,
   type MatchedSong,
   type TempoEngine,
-} from '@tempo-match/engine';
+} from '@tempo-match/collector';
 import { contentVersion, versionUrls } from './asset-version.ts';
 import type { RateLimiter } from './rate-limit.ts';
 

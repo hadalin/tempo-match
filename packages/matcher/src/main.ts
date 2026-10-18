@@ -1,4 +1,4 @@
-import { engineFromEnv, MissingConfigError, type TempoEngine } from '@tempo-match/engine';
+import { engineFromEnv, MissingConfigError, type TempoEngine } from '@tempo-match/collector';
 import { fixedWindow, InvalidRateLimitError, parseRateLimit, type RateLimiter } from './rate-limit.ts';
 import { webServer } from './server.ts';
 

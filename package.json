@@ -10,8 +10,8 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "node --watch-path=packages --env-file-if-exists=.env packages/web/src/main.ts",
-    "start": "node --env-file-if-exists=.env packages/web/src/main.ts",
+    "dev": "node --watch-path=packages --env-file-if-exists=.env packages/matcher/src/main.ts",
+    "start": "node --env-file-if-exists=.env packages/matcher/src/main.ts",
     "test": "node --test \"packages/*/test/**/*.test.ts\"",
     "typecheck": "tsc"
   },

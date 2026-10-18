@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
-import type { TempoEngine } from '@tempo-match/engine';
+import type { TempoEngine } from '@tempo-match/collector';
 import { fixedWindow, InvalidRateLimitError, parseRateLimit } from '../src/rate-limit.ts';
 import { webServer } from '../src/server.ts';
 
