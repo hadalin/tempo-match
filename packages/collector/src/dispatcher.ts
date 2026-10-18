@@ -25,6 +25,8 @@ export interface Policy {
   service: Service;
   /** Wait from the end of one call to the start of the next. */
   spacingMs: number;
+  /** Fraction each spacing varies at random either way, so the average spacing stays spacingMs. */
+  spacingJitter: number;
   dailyCalls: number;
   dailyRechecks: number;
 }
@@ -118,7 +120,8 @@ export function dispatcher(db: DatabaseSync, policy: Policy, clock: Clock, rando
   }
 
   async function run<T>(kind: CallKind, send: () => Promise<T>): Promise<T> {
-    const wait = lastEnd + policy.spacingMs - clock.monotonic();
+    const spacing = policy.spacingMs * (1 + policy.spacingJitter * (2 * random() - 1));
+    const wait = lastEnd + spacing - clock.monotonic();
     if (wait > 0) {
       await clock.sleep(wait);
     }

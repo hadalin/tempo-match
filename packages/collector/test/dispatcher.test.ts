@@ -17,13 +17,13 @@ import { Verification } from '../src/status.ts';
 import { memoryCatalog } from './catalog.ts';
 import { fakeClock, NOW, type FakeClock } from './fake-clock.ts';
 
-const SMALL: Policy = { service: 'spotify', spacingMs: 3000, dailyCalls: 5, dailyRechecks: 2 };
+const SMALL: Policy = { service: 'spotify', spacingMs: 3000, spacingJitter: 0, dailyCalls: 5, dailyRechecks: 2 };
 
-function setup(policy = SMALL) {
+function setup(policy = SMALL, random = () => 0.5) {
   const { db } = memoryCatalog();
   const clock = fakeClock();
   const sends: number[] = [];
-  const calls = dispatcher(db, policy, clock, () => 0.5);
+  const calls = dispatcher(db, policy, clock, random);
   const send = (outcome?: Error, durationMs = 0) => async () => {
     sends.push(clock.now());
     clock.advance(durationMs);
@@ -61,16 +61,37 @@ test('sends one call at a time, in order', async () => {
   assert.deepEqual(sends, [NOW + 3000, NOW + 7000, NOW + 11000]);
 });
 
-test('Spotify spreads its daily calls evenly over the day, one per 86.4 s', async () => {
-  const { sends, calls, send } = setup(SPOTIFY);
+function seeded(seed: number) {
+  return () => {
+    seed = (seed * 1_103_515_245 + 12_345) % 2 ** 31;
+    return seed / 2 ** 31;
+  };
+}
 
-  for (let i = 0; i < 10; i++) {
-    await calls.call(CallKind.Plain, send(undefined, 500));
+test('Spotify spaces calls at random, 43.2-129.6 s apart, averaging 86.4 s', async () => {
+  const { sends, calls, send } = setup(SPOTIFY, seeded(1));
+
+  for (let i = 0; i < 1000; i++) {
+    await calls.call(CallKind.Plain, send());
   }
 
   const gaps = sends.slice(1).map((start, i) => start - sends[i]);
-  assert.deepEqual(new Set(gaps), new Set([86_400 + 500]));
+  const mean = gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length;
+  assert.ok(new Set(gaps).size > 900);
+  assert.ok(gaps.every((gap) => gap >= 43_200 && gap <= 129_600));
+  assert.ok(Math.abs(mean - 86_400) < 2_000, `mean gap ${mean}`);
   assert.equal(SPOTIFY.dailyCalls * SPOTIFY.spacingMs, DAY_MS);
+});
+
+test('Spotify gaps reach both bounds', async () => {
+  const draws = [0, 1];
+  const { sends, calls, send } = setup(SPOTIFY, () => draws.shift()!);
+
+  for (let i = 0; i < 2; i++) {
+    await calls.call(CallKind.Plain, send(undefined, 500));
+  }
+
+  assert.deepEqual(sends, [NOW + 43_200, NOW + 43_200 + 500 + 129_600]);
 });
 
 test('a restarted dispatcher waits a full gap before its first call', async () => {

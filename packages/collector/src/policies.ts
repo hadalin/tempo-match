@@ -8,11 +8,13 @@ const SPOTIFY_DAILY_CALLS = 1_000;
 export const SPOTIFY: Policy = {
   service: 'spotify',
   spacingMs: DAY_MS / SPOTIFY_DAILY_CALLS,
+  // A fixed gap reads as a machine-timed job.
+  spacingJitter: 0.5,
   dailyCalls: SPOTIFY_DAILY_CALLS,
   dailyRechecks: 100,
 };
-export const RECCOBEATS: Policy = { service: 'reccobeats', spacingMs: 60 * SECOND_MS, dailyCalls: Infinity, dailyRechecks: 0 };
+export const RECCOBEATS: Policy = { service: 'reccobeats', spacingMs: 60 * SECOND_MS, spacingJitter: 0, dailyCalls: Infinity, dailyRechecks: 0 };
 // GetSongBPM allows 3,000 requests an hour; this sends at most 180.
-export const GETSONGBPM: Policy = { service: 'getsongbpm', spacingMs: 20 * SECOND_MS, dailyCalls: Infinity, dailyRechecks: 0 };
+export const GETSONGBPM: Policy = { service: 'getsongbpm', spacingMs: 20 * SECOND_MS, spacingJitter: 0, dailyCalls: Infinity, dailyRechecks: 0 };
 // Under 5% of Deezer's reported 50 requests per 5 seconds.
-export const DEEZER: Policy = { service: 'deezer', spacingMs: 2 * SECOND_MS, dailyCalls: Infinity, dailyRechecks: 0 };
+export const DEEZER: Policy = { service: 'deezer', spacingMs: 2 * SECOND_MS, spacingJitter: 0, dailyCalls: Infinity, dailyRechecks: 0 };
