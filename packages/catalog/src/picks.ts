@@ -151,7 +151,6 @@ export function transitions(db: DatabaseSync): Transitions {
     `), () => []],
   ];
 
-  /** Leaves a song without picks in `market` with the miss that explains why, if any. */
   function settle(market: string, identity: string, id: string, tempo: number | null, now: number) {
     if (hasPicks.get(market, identity)) {
       return;

@@ -147,7 +147,6 @@ function serviceLine(row: Service, now: number): string {
   return parts.join(', ');
 }
 
-/** When the source's least recent item last finished, or null while an item has never finished. */
 function passDone(db: DatabaseSync, source: string): number | null {
   const row = db.prepare('SELECT count(done_at) AS done, min(done_at) AS oldest FROM crawl_state WHERE source = ?').get(source);
   return Number(row?.done) >= CRAWL_ITEMS[source] ? Number(row?.oldest) : null;

@@ -79,7 +79,6 @@ export function spotifyJobs(db: DatabaseSync, options: SchedulerOptions): Spotif
     return { title: String(name.title), artist: String(name.artist), isrc: typeof isrc === 'string' ? isrc : null };
   }
 
-  /** Looks the song up and stores the answer; a lookup that can never succeed counts as not found. */
   async function lookUp(identity: string, kind: CallKind): Promise<string | null> {
     const song = lookupSong(identity);
     if (!song) {

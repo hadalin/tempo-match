@@ -48,7 +48,6 @@ const t = transitions(db);
 const received = reports(db);
 let tickedAt = clock.monotonic();
 
-/** Runs `step` forever, resting while it has nothing to do or its service refuses calls. */
 async function loop(name: string, step: () => Promise<unknown>) {
   for (;;) {
     tickedAt = clock.monotonic();
