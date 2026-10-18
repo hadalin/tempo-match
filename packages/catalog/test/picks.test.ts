@@ -230,17 +230,24 @@ test('a pick is not served after its lifetime and the sweep deletes it', () => {
 
 test('the sweep deletes old misses, other markets and listings no pass has seen', () => {
   const { db, t, list } = catalog();
-  list('old', 120, {}, NOW);
-  list('new', 120, {}, NOW + UNSEEN_LISTING_MS);
-  t.applyLookup(GB, 'new', A, NOW);
+  const later = NOW + MISS_LIFETIME_MS;
+  list('old', 120, {}, later - UNSEEN_LISTING_MS);
+  list('new', 120, {}, later);
+  list('recent', 121, {}, later);
+  t.applyLookup(GB, 'new', A, later);
   t.applyLookup(US, 'new', null, NOW);
+  t.applyLookup(US, 'recent', null, NOW + 1);
 
-  t.sweep(US, NOW + UNSEEN_LISTING_MS);
+  t.sweep(US, later);
 
   assert.deepEqual(picks(db, GB), []);
-  assert.deepEqual(misses(db), []);
-  assert.deepEqual(db.prepare('SELECT identity FROM songs').all().map((r) => r.identity), ['new']);
-  assert.ok(MISS_LIFETIME_MS < UNSEEN_LISTING_MS);
+  assert.deepEqual(misses(db), [{ identity: 'recent', reason: 'not-found' }]);
+  assert.deepEqual(db.prepare('SELECT identity FROM songs ORDER BY identity').all().map((r) => r.identity), ['new', 'recent']);
+});
+
+test('a miss lasts as long as a pick', () => {
+  assert.equal(MISS_LIFETIME_MS, 180 * DAY_MS);
+  assert.equal(MISS_LIFETIME_MS, PICK_LIFETIME_MS);
 });
 
 test('a listing that turns out too short loses its pick; a deleted listing cascades', () => {
@@ -320,7 +327,9 @@ test('a duplicate miss goes when the serving pick expires', () => {
   list('owner', 120);
   list('alias', 120);
   t.applyLookup(US, 'owner', A, NOW);
-  t.applyLookup(US, 'alias', A, NOW + MISS_LIFETIME_MS);
+  t.applyLookup(US, 'alias', A, NOW + 1);
+  list('owner', 120, {}, NOW + PICK_LIFETIME_MS);
+  list('alias', 120, {}, NOW + PICK_LIFETIME_MS);
 
   t.sweep(US, NOW + PICK_LIFETIME_MS);
 

@@ -4,7 +4,7 @@ import { transaction } from './schema.ts';
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const PICK_LIFETIME_MS = 180 * DAY_MS;
 export const REFRESH_AFTER_MS = PICK_LIFETIME_MS - 7 * DAY_MS;
-export const MISS_LIFETIME_MS = 14 * DAY_MS;
+export const MISS_LIFETIME_MS = PICK_LIFETIME_MS;
 export const UNSEEN_LISTING_MS = 90 * DAY_MS;
 export const COUNTRY_DAYS = 30;
 export const TEMPO_TOLERANCE_BPM = 3;
