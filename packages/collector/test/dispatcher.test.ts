@@ -61,15 +61,16 @@ test('sends one call at a time, in order', async () => {
   assert.deepEqual(sends, [NOW + 3000, NOW + 7000, NOW + 11000]);
 });
 
-test('Spotify gets at most 20 calls in any minute', async () => {
+test('Spotify spreads its daily calls evenly over the day, one per 86.4 s', async () => {
   const { sends, calls, send } = setup(SPOTIFY);
 
-  for (let i = 0; i < 60; i++) {
-    await calls.call(CallKind.Plain, send());
+  for (let i = 0; i < 10; i++) {
+    await calls.call(CallKind.Plain, send(undefined, 500));
   }
 
-  const busiest = Math.max(...sends.map((start) => sends.filter((s) => s >= start && s < start + 60_000).length));
-  assert.equal(busiest, 20);
+  const gaps = sends.slice(1).map((start, i) => start - sends[i]);
+  assert.deepEqual(new Set(gaps), new Set([86_400 + 500]));
+  assert.equal(SPOTIFY.dailyCalls * SPOTIFY.spacingMs, DAY_MS);
 });
 
 test('a restarted dispatcher waits a full gap before its first call', async () => {

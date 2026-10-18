@@ -1,8 +1,16 @@
+import { DAY_MS } from '@tempo-match/catalog';
 import type { Policy } from './dispatcher.ts';
 import { SECOND_MS } from './upstream.ts';
 
-// About 300 searches in 2.5 minutes got the app blocked for 14 hours; this is a sixth of that rate.
-export const SPOTIFY: Policy = { service: 'spotify', spacingMs: 3 * SECOND_MS, dailyCalls: 1_000, dailyRechecks: 100 };
+// About 700 calls in 40 minutes, one per 3 s, got the app blocked for 19 hours, so the daily
+// calls are spread over the whole day.
+const SPOTIFY_DAILY_CALLS = 1_000;
+export const SPOTIFY: Policy = {
+  service: 'spotify',
+  spacingMs: DAY_MS / SPOTIFY_DAILY_CALLS,
+  dailyCalls: SPOTIFY_DAILY_CALLS,
+  dailyRechecks: 100,
+};
 export const RECCOBEATS: Policy = { service: 'reccobeats', spacingMs: 60 * SECOND_MS, dailyCalls: Infinity, dailyRechecks: 0 };
 // GetSongBPM allows 3,000 requests an hour; this sends at most 180.
 export const GETSONGBPM: Policy = { service: 'getsongbpm', spacingMs: 20 * SECOND_MS, dailyCalls: Infinity, dailyRechecks: 0 };
