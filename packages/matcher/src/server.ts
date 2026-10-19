@@ -37,6 +37,7 @@ const PAGES = new Map(
     ['/', 'index.html'],
     ['/privacy', 'privacy.html'],
     ['/terms', 'terms.html'],
+    ['/faq', 'faq.html'],
   ].map(([path, file]) => [path, versionUrls(readPublic(file).toString(), ASSET_VERSIONS)]),
 );
 

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FAQ · Tempo Match</title>
+  <meta name="description" content="Why autoplay can pause in a background tab, why some songs play only a 30-second preview, and what you can do about it.">
+  <meta property="og:site_name" content="Tempo Match">
+  <meta name="twitter:title" content="FAQ · Tempo Match">
+  <meta name="twitter:description" content="Why autoplay can pause in a background tab, why some songs play only a 30-second preview, and what you can do about it.">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="stylesheet" href="/theme.css">
+  <style>
+    body {
+      margin: 0;
+      padding: 16px;
+      background: var(--bg);
+      color: var(--fg);
+      font: 16px/1.6 system-ui, sans-serif;
+    }
+    main { max-width: 640px; margin: 0 auto; }
+    h1 { font-size: 1.75rem; }
+    h2 { margin-top: 32px; font-size: 1.15rem; }
+    a { color: inherit; }
+    nav a { display: inline-block; padding: 10px 0; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main>
+    <nav><a href="/">← Tempo Match</a></nav>
+    <h1>FAQ</h1>
+
+    <h2>Why does the next song wait until I come back to the tab?</h2>
+    <p>Chrome holds back new media in tabs you are not looking at. With autoplay on, the next song is already lined up and starts as soon as the tab is visible again. No setting changes this. For continuous play, keep the tab visible, for example in its own window that is not minimized or covered.</p>
+
+    <h2>Why do I only get 30-second previews?</h2>
+    <p>The Spotify player plays full songs only when you are logged in to Spotify in the same browser. Some browsers keep that login away from the player:</p>
+    <ul>
+      <li><strong>Firefox:</strong> Enhanced Tracking Protection hides your Spotify login from the player. Click play inside the player to get the full song, or turn Enhanced Tracking Protection off for this site with the shield icon left of the address bar.</li>
+      <li><strong>Chrome:</strong> full songs work when you are logged in. In an Incognito window, or with third-party cookies blocked, allow third-party cookies for this site with the icon left of the address bar.</li>
+      <li><strong>Safari, and every browser on iPhone and iPad:</strong> Spotify's player plays only previews there. Use "Play on Spotify" for the full song.</li>
+    </ul>
+
+    <h2>I'm not logged in to Spotify. What do I get?</h2>
+    <p>Previews only. Log in at <a href="https://open.spotify.com">open.spotify.com</a> in the same browser, then come back here.</p>
+  </main>
+</body>
+</html>

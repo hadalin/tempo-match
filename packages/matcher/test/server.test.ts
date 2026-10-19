@@ -118,7 +118,7 @@ for (const [path, type] of IMAGES) {
   });
 }
 
-for (const page of ['/', '/privacy', '/terms']) {
+for (const page of ['/', '/privacy', '/terms', '/faq']) {
   test(`links the favicons and describes ${page}`, async () => {
     const html = await (await fetch(`${base}${page}`)).text();
 
@@ -149,7 +149,7 @@ test('shares the page with an absolute preview image', async () => {
   assert.match(html, /<meta name="twitter:card" content="summary_large_image">/);
 });
 
-for (const path of ['/', '/privacy', '/terms', '/app.js', '/theme.css', '/favicon.svg', '/og-image.png', '/api/song?bpm=120', '/missing']) {
+for (const path of ['/', '/privacy', '/terms', '/faq', '/app.js', '/theme.css', '/favicon.svg', '/og-image.png', '/api/song?bpm=120', '/missing']) {
   test(`sends security headers on ${path}`, async () => {
     const res = await fetch(`${base}${path}`);
     const csp = res.headers.get('content-security-policy') ?? '';
@@ -172,7 +172,7 @@ for (const path of ['/api/song?bpm=120', '/api/song?bpm=abc', '/api/song?lucky=1
   });
 }
 
-for (const page of ['/', '/privacy', '/terms']) {
+for (const page of ['/', '/privacy', '/terms', '/faq']) {
   test(`makes caches revalidate ${page}`, async () => {
     const res = await fetch(`${base}${page}`);
 
@@ -208,7 +208,7 @@ for (const [path, file] of ASSETS) {
   }
 }
 
-for (const [path, title] of [['/privacy', 'Privacy'], ['/terms', 'Terms']] as const) {
+for (const [path, title] of [['/privacy', 'Privacy'], ['/terms', 'Terms'], ['/faq', 'FAQ']] as const) {
   test(`serves ${path} and links it from the page footer`, async () => {
     const res = await fetch(`${base}${path}`);
     const index = await (await fetch(`${base}/`)).text();
