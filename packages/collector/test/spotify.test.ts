@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { mock, test } from 'node:test';
-import { UNTIL_UNBLOCKED } from '@tempo-match/catalog';
+import { UNTIL_UNBLOCKED, utcDay } from '@tempo-match/catalog';
 import { CallKind, dispatcher } from '../src/dispatcher.ts';
-import { ResponseFormatError } from '../src/errors.ts';
+import { RefusedError, ResponseFormatError, UnauthorizedError } from '../src/errors.ts';
 import { SPOTIFY } from '../src/policies.ts';
 import { spotify, type LookupSong } from '../src/spotify.ts';
 import { memoryCatalog } from './catalog.ts';
@@ -118,4 +118,93 @@ test('counts both searches of a re-check against the re-check share', async () =
     calls: 3,
     recheck_calls: 2,
   });
+});
+
+const TOKEN_SECONDS = 3600;
+
+/**
+ * A fake Spotify whose tokens expire after TOKEN_SECONDS, that answers 401 to the first `refused`
+ * searches and 400 invalid_client to every token request after the first `tokens`.
+ */
+function expiringSetup(refused = 0, tokens = Infinity) {
+  const { db } = memoryCatalog();
+  const clock = fakeClock();
+  const issued = new Map<string, number>();
+  let refusals = refused;
+  const route: Route = (url, init) => {
+    if (url.hostname === 'accounts.spotify.com') {
+      if (issued.size >= tokens) {
+        return json({ error: 'invalid_client' }, 400);
+      }
+      const value = `token-${issued.size + 1}`;
+      issued.set(value, clock.now());
+      return json({ access_token: value, expires_in: TOKEN_SECONDS });
+    }
+    const bearer = new Headers(init?.headers).get('Authorization')!.replace('Bearer ', '');
+    const expired = clock.now() >= issued.get(bearer)! + TOKEN_SECONDS * 1000;
+    if (expired || refusals-- > 0) {
+      return json({ error: { status: 401, message: 'The access token expired' } }, 401);
+    }
+    return json({ tracks: { items: [track()] } });
+  };
+  const { fetch, calls } = fakeFetch(route);
+  const longestGap = () => 1;
+  const lookup = spotify({ clientId: 'id', clientSecret: 'secret' }, dispatcher(db, SPOTIFY, clock, longestGap), fetch, clock.now);
+  const upstream = () => ({ ...db.prepare("SELECT calls, held_until FROM upstream WHERE service = 'spotify'").get() });
+  const bearers = () =>
+    calls.filter((c) => c.url.hostname === 'api.spotify.com').map((c) => new Headers(c.init?.headers).get('Authorization'));
+  return { db, clock, issued, lookup, upstream, bearers };
+}
+
+test('sends a fresh token when the cached one expires while the search waits for its turn', async () => {
+  const { clock, issued, lookup, upstream, bearers } = expiringSetup();
+  await lookup.lookup(SONG, 'US', CallKind.Plain);
+
+  // 100 s before expiry the token is outside its refresh margin, but the next search waits 130 s.
+  clock.advance(issued.get('token-1')! + (TOKEN_SECONDS - 100) * 1000 - clock.now());
+  await lookup.lookup(SONG, 'US', CallKind.Plain);
+  assert.equal(await lookup.lookup(SONG, 'US', CallKind.Plain), ID);
+
+  assert.deepEqual(bearers(), ['Bearer token-1', 'Bearer token-1', 'Bearer token-2']);
+  assert.equal(upstream().calls, 5);
+});
+
+test('recovers from a refused token with one fresh token and counts both requests', async () => {
+  const { lookup, upstream, bearers } = expiringSetup(1);
+
+  assert.equal(await lookup.lookup(SONG, 'US', CallKind.Plain), ID);
+
+  assert.deepEqual(bearers(), ['Bearer token-1', 'Bearer token-2']);
+  assert.deepEqual(upstream(), { calls: 4, held_until: 0 });
+});
+
+test('holds Spotify when a fresh token is refused too', async () => {
+  const { lookup, upstream, bearers } = expiringSetup(Infinity);
+  mock.method(console, 'error', () => {});
+
+  await assert.rejects(lookup.lookup(SONG, 'US', CallKind.Plain), /Spotify search request failed with HTTP 401/);
+
+  assert.deepEqual(bearers(), ['Bearer token-1', 'Bearer token-2']);
+  assert.deepEqual(upstream(), { calls: 4, held_until: UNTIL_UNBLOCKED });
+});
+
+test('holds Spotify when its token is refused and the app is removed', async () => {
+  const { lookup, upstream, bearers } = expiringSetup(1, 1);
+  mock.method(console, 'error', () => {});
+
+  await assert.rejects(lookup.lookup(SONG, 'US', CallKind.Plain), (err) =>
+    err instanceof UnauthorizedError && err.message.startsWith('Spotify token'));
+
+  assert.deepEqual(bearers(), ['Bearer token-1']);
+  assert.deepEqual(upstream(), { calls: 3, held_until: UNTIL_UNBLOCKED });
+});
+
+test('refuses the retry of a refused token when the day has no calls left', async () => {
+  const { db, clock, lookup, upstream, bearers } = expiringSetup(1);
+  db.prepare("UPDATE upstream SET day = ?, calls = ? WHERE service = 'spotify'").run(utcDay(clock.now()), SPOTIFY.dailyCalls - 2);
+
+  await assert.rejects(lookup.lookup(SONG, 'US', CallKind.Plain), RefusedError);
+
+  assert.deepEqual(bearers(), ['Bearer token-1']);
+  assert.deepEqual(upstream(), { calls: SPOTIFY.dailyCalls, held_until: 0 });
 });

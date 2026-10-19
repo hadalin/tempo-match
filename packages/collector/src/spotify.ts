@@ -1,5 +1,5 @@
 import { MIN_SONG_SECONDS, normalize, normalizeTitle } from '@tempo-match/catalog';
-import { CallKind, type Dispatcher } from './dispatcher.ts';
+import { CallKind, type Dispatcher, type Reserve } from './dispatcher.ts';
 import { ResponseFormatError, retriesLater, UnauthorizedError, UpstreamError } from './errors.ts';
 import { request, SECOND_MS } from './upstream.ts';
 
@@ -7,6 +7,7 @@ const TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const SEARCH_URL = 'https://api.spotify.com/v1/search';
 const SEARCH_LIMIT = 5;
 const TOKEN_REFRESH_MARGIN_MS = 60_000;
+const HTTP_UNAUTHORIZED = 401;
 const ISRC_PATTERN = /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/;
 const MIN_DURATION_MS = MIN_SONG_SECONDS * SECOND_MS;
 const SEARCH = 'Spotify search';
@@ -54,26 +55,25 @@ export function spotify(
 ): SpotifyLookup {
   let token: Token | null = null;
 
-  async function accessToken(): Promise<string> {
+  async function accessToken(reserve: Reserve): Promise<string> {
     if (token && now() < token.expiresAt) {
       return token.value;
     }
 
+    reserve(CallKind.Plain);
     const basic = Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString('base64');
-    token = await calls.call(CallKind.Plain, async () => {
-      try {
-        return await fetchToken(basic);
-      } catch (err) {
-        if (retriesLater(err)) {
-          throw err;
-        }
-        // Spotify answers a bad secret or a removed app with 400 invalid_client, not 401.
-        if (err instanceof UpstreamError) {
-          throw new UnauthorizedError(TOKEN, err);
-        }
-        throw new ResponseFormatError(TOKEN, (err as Error).message);
+    try {
+      token = await fetchToken(basic);
+    } catch (err) {
+      if (retriesLater(err)) {
+        throw err;
       }
-    });
+      // Spotify answers a bad secret or a removed app with 400 invalid_client, not 401.
+      if (err instanceof UpstreamError) {
+        throw new UnauthorizedError(TOKEN, err);
+      }
+      throw new ResponseFormatError(TOKEN, (err as Error).message);
+    }
     return token.value;
   }
 
@@ -97,16 +97,32 @@ export function spotify(
     url.searchParams.set('market', market);
     url.searchParams.set('limit', String(SEARCH_LIMIT));
 
-    const bearer = await accessToken();
-    return calls.call(kind, async () => {
-      const res = await request(SEARCH, fetchFn, url, { headers: { Authorization: `Bearer ${bearer}` } });
-      const body = (await res.json()) as { tracks?: { items?: SearchTrack[] } };
-      const items = body.tracks?.items ?? [];
-      if (items.some((item) => typeof item.is_playable !== 'boolean')) {
-        throw new ResponseFormatError(SEARCH, 'a track without is_playable');
+    return calls.call(kind, async (reserve) => {
+      const bearer = await accessToken(reserve);
+      try {
+        return await fetchTracks(url, bearer);
+      } catch (err) {
+        if (!rejectsToken(err)) {
+          throw err;
+        }
       }
-      return items;
+
+      // Spotify can revoke a token early; a refused fresh one means refused credentials.
+      token = null;
+      const fresh = await accessToken(reserve);
+      reserve(kind);
+      return fetchTracks(url, fresh);
     });
+  }
+
+  async function fetchTracks(url: URL, bearer: string): Promise<SearchTrack[]> {
+    const res = await request(SEARCH, fetchFn, url, { headers: { Authorization: `Bearer ${bearer}` } });
+    const body = (await res.json()) as { tracks?: { items?: SearchTrack[] } };
+    const items = body.tracks?.items ?? [];
+    if (items.some((item) => typeof item.is_playable !== 'boolean')) {
+      throw new ResponseFormatError(SEARCH, 'a track without is_playable');
+    }
+    return items;
   }
 
   return {
@@ -130,6 +146,10 @@ export function spotify(
       return track?.id ?? null;
     },
   };
+}
+
+function rejectsToken(err: unknown): boolean {
+  return err instanceof UnauthorizedError && err.status === HTTP_UNAUTHORIZED;
 }
 
 function isPlayable(track: SearchTrack): boolean {

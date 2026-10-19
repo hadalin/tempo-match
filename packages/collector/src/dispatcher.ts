@@ -31,15 +31,19 @@ export interface Policy {
   dailyRechecks: number;
 }
 
+/** Counts one more request of a running call against the UTC day's calls, or throws RefusedError. */
+export type Reserve = (kind: CallKind) => void;
+
 /** Every call to one upstream service goes through its dispatcher. */
 export interface Dispatcher {
   readonly service: Service;
   /**
    * Waits for the spacing after the previous call ended, reserves the call in the catalog, sends
    * it and stores what the answer means for later calls. Throws RefusedError without sending
-   * while the service is banned or held or the UTC day's calls are spent.
+   * while the service is banned or held or the UTC day's calls are spent. A send that makes more
+   * than one request reserves each extra one first.
    */
-  call<T>(kind: CallKind, send: () => Promise<T>): Promise<T>;
+  call<T>(kind: CallKind, send: (reserve: Reserve) => Promise<T>): Promise<T>;
   rechecksLeft(): number;
 }
 
@@ -119,7 +123,7 @@ export function dispatcher(db: DatabaseSync, policy: Policy, clock: Clock, rando
     }
   }
 
-  async function run<T>(kind: CallKind, send: () => Promise<T>): Promise<T> {
+  async function run<T>(kind: CallKind, send: (reserve: Reserve) => Promise<T>): Promise<T> {
     const spacing = policy.spacingMs * (1 + policy.spacingJitter * (2 * random() - 1));
     const wait = lastEnd + spacing - clock.monotonic();
     if (wait > 0) {
@@ -128,7 +132,7 @@ export function dispatcher(db: DatabaseSync, policy: Policy, clock: Clock, rando
     reserveCall(kind);
 
     try {
-      const result = await send();
+      const result = await send(reserveCall);
       succeed.run(service);
       return result;
     } catch (err) {

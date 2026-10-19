@@ -31,8 +31,12 @@ export class RateLimitedError extends UpstreamError {
 
 /** 401, 403 or refused credentials: no call until an operator unblocks the service. */
 export class UnauthorizedError extends UpstreamError {
+  /** The HTTP status, or null when the failure was refused credentials. */
+  readonly status: number | null;
+
   constructor(service: string, failure: number | Error) {
     super(service, failure);
+    this.status = typeof failure === 'number' ? failure : null;
     this.name = 'UnauthorizedError';
   }
 }
