@@ -11,6 +11,11 @@ export class UpstreamError extends Error {
   }
 }
 
+/** Whether text is an UpstreamError message: a hold with one was stored by a failure, not an operator. */
+export function isUpstreamFailure(text: string): boolean {
+  return / request failed( with HTTP \d+$|: )/.test(text);
+}
+
 /** A network error, a timeout, a 5xx or a quota error: retried after a growing back-off. */
 export class UnavailableError extends UpstreamError {
   constructor(service: string, failure: number | Error | string) {

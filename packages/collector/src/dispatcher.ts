@@ -14,6 +14,7 @@ const FIRST_BACK_OFF_MS = 30 * SECOND_MS;
 const MAX_BACK_OFF_MS = 60 * 60 * SECOND_MS;
 const RATE_LIMIT_FALLBACK_MS = 30 * SECOND_MS;
 const JITTER = 0.5;
+const UNBLOCK = 'docker compose exec collector node packages/collector/src/admin.ts unblock';
 
 export const CallKind = {
   Plain: 'plain',
@@ -119,7 +120,7 @@ export function dispatcher(db: DatabaseSync, policy: Policy, clock: Clock, rando
     }
     if (err instanceof UnauthorizedError || err instanceof ResponseFormatError) {
       hold.run(UNTIL_UNBLOCKED, err.message, service);
-      console.error(`${err.message}, no calls until an operator unblocks ${service}`);
+      console.error(`error: ${err.message}, no calls until an operator runs: ${UNBLOCK} ${service}`);
     }
   }
 

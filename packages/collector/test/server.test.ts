@@ -1,22 +1,26 @@
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
-import { test } from 'node:test';
+import type { DatabaseSync } from 'node:sqlite';
+import { mock, test } from 'node:test';
 import { identityOf, MAX_REPORT_BYTES, parseReport, SOURCE_GETSONGBPM, utcDay } from '@tempo-match/catalog';
 import { runCommand } from '../src/commands.ts';
+import { CallKind, dispatcher } from '../src/dispatcher.ts';
+import { RateLimitedError, UnauthorizedError } from '../src/errors.ts';
+import { SPOTIFY } from '../src/policies.ts';
 import { reports } from '../src/reports.ts';
 import { collectorServer } from '../src/server.ts';
-import { acceptance, ranges, Verification } from '../src/status.ts';
+import { acceptance, awaitingOperator, ranges, Verification } from '../src/status.ts';
 import { memoryCatalog } from './catalog.ts';
-import { NOW } from './fake-clock.ts';
+import { fakeClock, NOW } from './fake-clock.ts';
 
 const ID = 'A'.repeat(22);
 const COUNTS = { served: 3, fallback: 2, empty: 1, dead: 0 };
 const REPORT = { suspects: [{ market: 'US', spotifyTrackId: ID }], countries: { US: COUNTS, SI: COUNTS } };
 
-async function serve(t: { after(fn: () => void): void }, healthy = true) {
+async function serve(t: { after(fn: () => void): void }, problems = (db: DatabaseSync) => awaitingOperator(db)) {
   const { db } = memoryCatalog();
   const received = reports(db);
-  const server = collectorServer(received, () => healthy, () => NOW);
+  const server = collectorServer(received, () => problems(db), () => NOW);
   await new Promise<void>((resolve) => server.listen(0, resolve));
   t.after(() => server.close());
   const base = `http://localhost:${(server.address() as AddressInfo).port}`;
@@ -47,11 +51,47 @@ test('rejects a malformed report and one over 64 KB', async (t) => {
 
 test('answers health checks by the scheduler state', async (t) => {
   const { base } = await serve(t);
-  const stalled = await serve(t, false);
+  const stalled = await serve(t, () => ['scheduler stalled']);
 
   assert.equal((await fetch(`${base}/healthz`)).status, 200);
-  assert.equal((await fetch(`${stalled.base}/healthz`)).status, 503);
+  const res = await fetch(`${stalled.base}/healthz`);
+  assert.deepEqual([res.status, await res.text()], [503, 'scheduler stalled']);
   assert.equal((await fetch(`${base}/reports`)).status, 404);
+});
+
+test('fails health checks while a failure holds an upstream until an operator unblocks it', async (t) => {
+  const { db, base } = await serve(t);
+  const clock = fakeClock();
+  const calls = dispatcher(db, SPOTIFY, clock, () => 0.5);
+  const fail = (error: Error) => assert.rejects(calls.call(CallKind.Plain, async () => { throw error; }));
+  const health = async () => {
+    const res = await fetch(`${base}/healthz`);
+    return [res.status, await res.text()];
+  };
+  const admin = (...args: string[]) =>
+    runCommand(args, { db, path: ':memory:', market: 'US', verification: Verification.Checked, now: clock.now() });
+  const logged = mock.method(console, 'error', () => {});
+
+  assert.deepEqual(await health(), [200, 'ok']);
+
+  await fail(new RateLimitedError('Spotify search', '3600'));
+  assert.deepEqual(await health(), [200, 'ok']);
+  clock.advance(3600_000);
+
+  await fail(new UnauthorizedError('Spotify search', 401));
+  assert.deepEqual(await health(), [503, 'spotify held: Spotify search request failed with HTTP 401']);
+  assert.match(
+    String(logged.mock.calls.at(-1)?.arguments[0]),
+    /error.*Spotify search request failed with HTTP 401.*docker compose exec collector node packages\/collector\/src\/admin\.ts unblock spotify/,
+  );
+
+  admin('unblock', 'spotify');
+  assert.deepEqual(await health(), [200, 'ok']);
+
+  admin('hold', 'spotify', '--reason', 'maintenance');
+  assert.deepEqual(await health(), [200, 'ok']);
+  admin('unblock', 'spotify', '--not-before', new Date(clock.now() + 60_000).toISOString());
+  assert.deepEqual(await health(), [200, 'ok']);
 });
 
 test('a report of 200 suspects and every two-letter country fits in 64 KB', () => {

@@ -2,7 +2,7 @@ import { statSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { DAY_MS, MAX_BPM, MIN_BPM, PICK_LIFETIME_MS, UNTIL_UNBLOCKED, utcDay } from '@tempo-match/catalog';
 import { DEEZER_MAX_BPM, DEEZER_MIN_BPM, DEEZER_SEEDS } from './deezer.ts';
-import { RESPONSE_FORMAT } from './errors.ts';
+import { isUpstreamFailure, RESPONSE_FORMAT } from './errors.ts';
 
 const ACCEPTED_IDS = 5;
 const FEW_SONGS = 20;
@@ -66,6 +66,14 @@ export function acceptance(db: DatabaseSync, market: string, now: number, verifi
     return `not met: ${problems.join('; ')}`;
   }
   return verification === Verification.Checked ? 'met' : 'met (unverified)';
+}
+
+/** "spotify held: <reason>" for each service a failure held until an operator unblocks it. */
+export function awaitingOperator(db: DatabaseSync): string[] {
+  return db.prepare('SELECT service, hold_reason FROM upstream WHERE held_until = ? ORDER BY service')
+    .all(UNTIL_UNBLOCKED)
+    .filter((row) => isUpstreamFailure(String(row.hold_reason ?? '')))
+    .map((row) => `${row.service} held: ${row.hold_reason}`);
 }
 
 export function status(

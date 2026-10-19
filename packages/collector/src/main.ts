@@ -19,6 +19,7 @@ import { reports } from './reports.ts';
 import { featureChecks, spotifyJobs } from './scheduler.ts';
 import { collectorServer } from './server.ts';
 import { spotify } from './spotify.ts';
+import { awaitingOperator } from './status.ts';
 import { SECOND_MS } from './upstream.ts';
 
 const GETSONGBPM_PERIOD_MS = 7 * DAY_MS;
@@ -112,7 +113,10 @@ if (config.reccoBeats) {
   void loop('reccobeats', checks.step);
 }
 
-const healthy = () => clock.monotonic() - tickedAt < STALLED_MS;
-collectorServer(received, healthy).listen(config.port, () => {
+function problems(): string[] {
+  const held = awaitingOperator(db);
+  return clock.monotonic() - tickedAt < STALLED_MS ? held : ['scheduler stalled', ...held];
+}
+collectorServer(received, problems).listen(config.port, () => {
   console.log(`collector for market ${config.market} listening on port ${config.port}`);
 });

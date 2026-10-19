@@ -9,12 +9,15 @@ const HTTP_NOT_FOUND = 404;
 const HTTP_TOO_LARGE = 413;
 const HTTP_SERVICE_UNAVAILABLE = 503;
 
-/** The collector's port on the compose network: health and the matcher's minute reports. */
-export function collectorServer(received: Reports, healthy: () => boolean, now: () => number = Date.now): Server {
+/**
+ * The collector's port on the compose network: health and the matcher's minute reports. Health
+ * fails while problems() names any, answering them as the body.
+ */
+export function collectorServer(received: Reports, problems: () => string[], now: () => number = Date.now): Server {
   return createServer((req, res) => {
     if (req.method === 'GET' && req.url === '/healthz') {
-      const ok = healthy();
-      res.writeHead(ok ? HTTP_OK : HTTP_SERVICE_UNAVAILABLE).end(ok ? 'ok' : 'scheduler stalled');
+      const found = problems();
+      res.writeHead(found.length > 0 ? HTTP_SERVICE_UNAVAILABLE : HTTP_OK).end(found.join('; ') || 'ok');
       return;
     }
     if (req.method !== 'POST' || req.url !== '/reports') {
