@@ -12,6 +12,8 @@ const CSS = 'text/css; charset=utf-8';
 const SVG = 'image/svg+xml';
 const PNG = 'image/png';
 const JSON_TYPE = 'application/json';
+const TEXT = 'text/plain; charset=utf-8';
+const XML = 'application/xml; charset=utf-8';
 // Cloudflare answers a rate-limited request with an HTML page, so clients must not expect JSON.
 const RATE_LIMITED_PAGE = '<!doctype html><title>Too many requests</title><h1>Too many requests</h1>';
 
@@ -69,6 +71,13 @@ const COUNTRY_CODE = /^[A-Z]{2}$/;
 // Cloudflare's code for an IP it cannot place; its Tor code T1 already fails COUNTRY_CODE.
 const UNKNOWN_COUNTRY = 'XX';
 
+const SITE_ORIGIN = 'https://tempo-match.hadalin.me';
+
+const CRAWLER_FILES = new Map([
+  ['/robots.txt', { type: TEXT, body: robotsTxt() }],
+  ['/sitemap.xml', { type: XML, body: sitemapXml([...PAGES.keys()]) }],
+]);
+
 const HTTP_OK = 200;
 const HTTP_BAD_REQUEST = 400;
 const HTTP_NOT_FOUND = 404;
@@ -90,6 +99,16 @@ const SQLITE_PRIMARY_CODE = 0xff;
 
 function readPublic(file: string): Buffer {
   return readFileSync(new URL(`../public/${file}`, import.meta.url));
+}
+
+function robotsTxt(): string {
+  return `User-agent: *\nDisallow: ${API_PREFIX}\n\nSitemap: ${SITE_ORIGIN}/sitemap.xml\n`;
+}
+
+function sitemapXml(paths: string[]): string {
+  const urls = paths.map((path) => `  <url><loc>${SITE_ORIGIN}${path}</loc></url>\n`).join('');
+  return '<?xml version="1.0" encoding="UTF-8"?>\n'
+    + `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}</urlset>\n`;
 }
 
 
@@ -117,25 +136,34 @@ export function matcherServer(options: MatcherOptions): Server {
       res.setHeader('Cache-Control', 'no-store');
     }
 
+    // Node drops the body of a HEAD response itself, so HEAD can take every GET route.
+    const method = req.method === 'HEAD' ? 'GET' : req.method;
+
     const page = PAGES.get(url.pathname);
-    if (req.method === 'GET' && page) {
+    if (method === 'GET' && page) {
       send(res, HTTP_OK, HTML, page, { 'Cache-Control': PAGE_CACHE });
       return;
     }
 
     const asset = ASSETS.get(url.pathname);
-    if (req.method === 'GET' && asset) {
+    if (method === 'GET' && asset) {
       const cache = url.searchParams.get('v') === asset.version ? VERSIONED_ASSET_CACHE : UNVERSIONED_ASSET_CACHE;
       send(res, HTTP_OK, asset.type, asset.body, { 'Cache-Control': cache });
       return;
     }
 
-    if (req.method === 'GET' && url.pathname === '/healthz') {
+    const crawlerFile = CRAWLER_FILES.get(url.pathname);
+    if (method === 'GET' && crawlerFile) {
+      send(res, HTTP_OK, crawlerFile.type, crawlerFile.body, { 'Cache-Control': UNVERSIONED_ASSET_CACHE });
+      return;
+    }
+
+    if (method === 'GET' && url.pathname === '/healthz') {
       answerOrFail(res, options, () => health(res, options));
       return;
     }
 
-    if (req.method === 'GET' && url.pathname === '/api/song') {
+    if (method === 'GET' && url.pathname === '/api/song') {
       const retryAfter = options.rateLimiter?.();
       if (retryAfter !== undefined) {
         send(res, HTTP_TOO_MANY_REQUESTS, HTML, RATE_LIMITED_PAGE, { 'Retry-After': String(retryAfter) });

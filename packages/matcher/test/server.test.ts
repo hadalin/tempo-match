@@ -149,7 +149,7 @@ test('shares the page with an absolute preview image', async () => {
   assert.match(html, /<meta name="twitter:card" content="summary_large_image">/);
 });
 
-for (const path of ['/', '/privacy', '/terms', '/faq', '/app.js', '/theme.css', '/favicon.svg', '/og-image.png', '/api/song?bpm=120', '/missing']) {
+for (const path of ['/', '/privacy', '/terms', '/faq', '/app.js', '/theme.css', '/favicon.svg', '/og-image.png', '/robots.txt', '/sitemap.xml', '/api/song?bpm=120', '/missing']) {
   test(`sends security headers on ${path}`, async () => {
     const res = await fetch(`${base}${path}`);
     const csp = res.headers.get('content-security-policy') ?? '';
@@ -206,6 +206,74 @@ for (const [path, file] of ASSETS) {
       assert.equal(res.headers.get('cache-control'), 'public, max-age=300');
     });
   }
+}
+
+test('lets crawlers in, keeps them off the API and points them to the sitemap', async () => {
+  const res = await fetch(`${base}/robots.txt`);
+
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'text/plain; charset=utf-8');
+  assert.equal(
+    await res.text(),
+    'User-agent: *\nDisallow: /api/\n\nSitemap: https://tempo-match.hadalin.me/sitemap.xml\n',
+  );
+});
+
+test('lists every page in the sitemap by its absolute URL', async () => {
+  const res = await fetch(`${base}/sitemap.xml`);
+  const xml = await res.text();
+
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'application/xml; charset=utf-8');
+  assert.match(xml, /^<\?xml version="1\.0" encoding="UTF-8"\?>\n<urlset xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9">/);
+  assert.match(xml, /<\/urlset>\n$/);
+  const urls = [...xml.matchAll(/<url><loc>([^<]+)<\/loc><\/url>/g)].map(([, loc]) => loc);
+  assert.deepEqual(urls.toSorted(), [
+    'https://tempo-match.hadalin.me/',
+    'https://tempo-match.hadalin.me/faq',
+    'https://tempo-match.hadalin.me/privacy',
+    'https://tempo-match.hadalin.me/terms',
+  ]);
+});
+
+for (const path of ['/', '/faq', '/app.js', '/og-image.png', '/robots.txt', '/sitemap.xml', '/api/song?bpm=120', '/healthz', '/missing']) {
+  test(`answers HEAD ${path} like GET without a body`, async () => {
+    const get = await fetch(`${base}${path}`);
+    const head = await fetch(`${base}${path}`, { method: 'HEAD' });
+
+    assert.equal(head.status, get.status);
+    for (const header of ['content-type', 'cache-control', 'content-security-policy']) {
+      assert.equal(head.headers.get(header), get.headers.get(header), header);
+    }
+    assert.equal(await head.text(), '');
+  });
+}
+
+function jsonLd(html: string): unknown[] {
+  return [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map(([, json]) => JSON.parse(json));
+}
+
+test('describes the home page as a free web application', async () => {
+  const html = await (await fetch(`${base}/`)).text();
+  const description = html.match(/<meta name="description" content="([^"]+)">/)?.[1];
+
+  assert.deepEqual(jsonLd(html), [{
+    '@context': 'https://schema.org',
+    '@type': 'WebApplication',
+    name: 'Tempo Match',
+    url: 'https://tempo-match.hadalin.me/',
+    description,
+    applicationCategory: 'MultimediaApplication',
+    operatingSystem: 'Any',
+    browserRequirements: 'Requires JavaScript',
+    offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+  }]);
+});
+
+for (const page of ['/privacy', '/terms', '/faq']) {
+  test(`leaves structured data off ${page}`, async () => {
+    assert.deepEqual(jsonLd(await (await fetch(`${base}${page}`)).text()), []);
+  });
 }
 
 for (const [path, title] of [['/privacy', 'Privacy'], ['/terms', 'Terms'], ['/faq', 'FAQ']] as const) {
