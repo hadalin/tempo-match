@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Privacy · Tempo Match</title>
-  <meta name="description" content="Tempo Match has no accounts, stores no personal data and uses no analytics. What happens when you search.">
+  <meta name="description" content="Tempo Match has no accounts, sets no cookies of its own and uses no analytics.">
   <meta property="og:site_name" content="Tempo Match">
   <meta name="twitter:title" content="Privacy · Tempo Match">
-  <meta name="twitter:description" content="Tempo Match has no accounts, stores no personal data and uses no analytics. What happens when you search.">
+  <meta name="twitter:description" content="Tempo Match has no accounts, sets no cookies of its own and uses no analytics.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -31,17 +31,15 @@
   <main>
     <nav><a href="/">← Tempo Match</a></nav>
     <h1>Privacy</h1>
-    <p>Tempo Match has no accounts and stores no personal data. It sets no cookies of its own and uses no analytics. Your autoplay setting stays in your browser's local storage and is never sent to the server.</p>
+    <p>Tempo Match has no accounts, sets no cookies of its own and uses no analytics. Your autoplay setting stays in your browser.</p>
 
-    <h2>What happens when you search</h2>
-    <p>Your browser sends the chosen BPM to the Tempo Match server, which answers from its own list of songs. It calls no outside service while handling your search.</p>
-    <p>The list is collected ahead of time, at a fixed pace and independent of visitors: the server asks <a href="https://getsongbpm.com">GetSongBPM</a> and <a href="https://www.deezer.com">Deezer</a> for songs at each tempo, searches <a href="https://www.spotify.com">Spotify</a> for the matching tracks, and asks <a href="https://reccobeats.com">ReccoBeats</a> for the tempo of the tracks found. These requests carry tempos, song names, recording codes (ISRCs) and Spotify track IDs, never anything about visitors. The list keeps Spotify track IDs for at most 180 days and no Spotify names or images.</p>
-    <p>Cloudflare, which delivers the site, derives a country code from your IP address and supplies it to the server. Tempo Match adds each search to daily counts per country (songs served, tempos without a song, songs reported as not playing), keeps those counts for 30 days, and stores no IP addresses with them.</p>
-    <p>When a song's player does not load, the page asks for another song and reports the one that failed. To count how many different networks report a song, the server keeps the network part of your IP address (the first three parts of an IPv4 address, the first three groups of an IPv6 address) in memory for at most 24 hours. It is never written to disk or sent anywhere.</p>
-    <p>Tempo Match does not log your searches. Whoever hosts a copy of the app may keep standard server access logs, such as IP addresses, under their own policy.</p>
+    <h2>Searching</h2>
+    <p>Your searches are not logged. Songs are gathered ahead of time from <a href="https://getsongbpm.com">GetSongBPM</a>, <a href="https://www.deezer.com">Deezer</a>, <a href="https://www.spotify.com">Spotify</a> and <a href="https://reccobeats.com">ReccoBeats</a>, and nothing about you is ever sent to them.</p>
+    <p>Cloudflare, which delivers the site, tells Tempo Match which country you're in. That's used only for daily counts per country, kept for 30 days, with no IP addresses.</p>
+    <p>If a song won't play, part of your network address is kept for up to 24 hours to spot songs that many people report, then thrown away.</p>
 
     <h2>Spotify player</h2>
-    <p>When a song is found, the page shows Spotify's embedded player. It loads directly from Spotify in your browser, so Spotify receives your IP address and browser details and may set its own cookies, including recognising you if you are logged in to Spotify. The "Play on Spotify" button opens the Spotify app. Spotify's handling of that data is covered by the <a href="https://www.spotify.com/legal/privacy-policy/">Spotify Privacy Policy</a>.</p>
+    <p>The player comes straight from Spotify, so Spotify sees the usual things any website sees and may set its own cookies. See the <a href="https://www.spotify.com/legal/privacy-policy/">Spotify Privacy Policy</a>.</p>
 
     <h2>Contact</h2>
     <p>Questions about privacy: open an issue at <a href="https://github.com/hadalin/tempo-match/issues">github.com/hadalin/tempo-match/issues</a>.</p>
