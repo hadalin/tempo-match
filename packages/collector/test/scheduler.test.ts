@@ -3,15 +3,18 @@ import { mock, test } from 'node:test';
 import {
   DAY_MS,
   identityOf,
+  PICK_LIFETIME_MS,
   REFRESH_AFTER_MS,
   SOURCE_GETSONGBPM,
   UNTIL_UNBLOCKED,
   utcDay,
   type Suspect,
 } from '@tempo-match/catalog';
+import { runCommand, UsageError } from '../src/commands.ts';
 import { CallKind, dispatcher } from '../src/dispatcher.ts';
 import { RefusedError, UnauthorizedError, UpstreamError } from '../src/errors.ts';
 import { SPOTIFY } from '../src/policies.ts';
+import { Verification } from '../src/status.ts';
 import { featureChecks, Job, spotifyJobs } from '../src/scheduler.ts';
 import { spotify as spotifyLookup, type LookupSong } from '../src/spotify.ts';
 import { memoryCatalog } from './catalog.ts';
@@ -170,6 +173,25 @@ test('a token the endpoint refuses holds Spotify and stores nothing', async () =
   assert.equal(db.prepare("SELECT held_until FROM upstream WHERE service = 'spotify'").get()?.held_until, UNTIL_UNBLOCKED);
   assert.equal(db.prepare('SELECT count(*) AS n FROM misses').get()?.n, 0);
   assert.equal(db.prepare('SELECT count(*) AS n FROM picks').get()?.n, 1);
+});
+
+test('a rejected track loses its picks and is not picked again after they would have expired', async () => {
+  const { db, clock, jobs, lookups, list } = setup({ Interlude: ID('R') });
+  list('Interlude', 44);
+  list('Interlude', 88);
+  await jobs.step();
+  const reject = (id: string) =>
+    runCommand(['reject', id], { db, path: ':memory:', market: 'US', verification: Verification.Checked, now: clock.now() });
+
+  assert.equal(reject(ID('R')), `rejected ${ID('R')}: removed 2 picks of 1 song`);
+  assert.equal(db.prepare('SELECT count(*) AS n FROM picks').get()?.n, 0);
+
+  clock.advance(PICK_LIFETIME_MS + DAY_MS);
+  list('Interlude', 44);
+
+  assert.equal(await jobs.step(), null);
+  assert.deepEqual(lookups.map(([title]) => title), ['Interlude']);
+  assert.throws(() => reject('short'), UsageError);
 });
 
 test('passes the ISRC of the most popular listing that has one', async () => {

@@ -3,11 +3,13 @@ import { SERVICES, transaction, UNTIL_UNBLOCKED, type Service } from '@tempo-mat
 import { status, Verification } from './status.ts';
 
 const ALL = 'all';
+const SPOTIFY_TRACK_ID = /^[0-9A-Za-z]{22}$/;
 const USAGE = `Usage:
   admin.ts status
   admin.ts hold <service|all> --reason <text>
   admin.ts unblock <service|all> [--not-before <ISO time>]
   admin.ts clear-ban <service> --reason <text>
+  admin.ts reject <spotify-track-id>
 Services: ${SERVICES.join(', ')}`;
 
 export class UsageError extends Error {
@@ -27,7 +29,8 @@ export interface AdminContext {
 
 /**
  * Runs one operator command against the catalog and returns what to print. Holds and bans
- * change only upstream rows; no command calls an upstream service.
+ * change only upstream rows; a rejection deletes the picks of a track and keeps their songs out
+ * for good. No command calls an upstream service.
  */
 export function runCommand(args: string[], context: AdminContext): string {
   const [command, target, ...rest] = args;
@@ -51,6 +54,9 @@ export function runCommand(args: string[], context: AdminContext): string {
     update(db, [service], 'UPDATE upstream SET banned_until = 0, ban_reason = ?, failures = 0 WHERE service = ?', `cleared: ${reason}`);
     return `cleared the ban of ${service}: ${reason}`;
   }
+  if (command === 'reject') {
+    return reject(db, trackId(target));
+  }
   throw new UsageError(command ? `Unknown command "${command}"` : 'No command');
 }
 
@@ -61,6 +67,34 @@ function update(db: DatabaseSync, targets: Service[], sql: string, ...values: (s
       statement.run(...values, service);
     }
   });
+}
+
+// Misses keep no Spotify id, so the rejection is a spoken-word miss of each song that held the
+// track, dated so that no sweep expires it.
+function reject(db: DatabaseSync, id: string): string {
+  const held = transaction(db, () => {
+    const songs = db.prepare('SELECT DISTINCT market, identity FROM picks WHERE spotify_track_id = ?').all(id);
+    const { changes } = db.prepare('DELETE FROM picks WHERE spotify_track_id = ?').run(id);
+    const putMiss = db.prepare(`
+      INSERT INTO misses (market, identity, reason, looked_up_at) VALUES (?, ?, 'spoken', ?)
+      ON CONFLICT (market, identity) DO UPDATE SET reason = excluded.reason, looked_up_at = excluded.looked_up_at
+    `);
+    for (const { market, identity } of songs) {
+      putMiss.run(String(market), String(identity), UNTIL_UNBLOCKED);
+    }
+    return { picks: Number(changes), songs: songs.length };
+  });
+  if (held.songs === 0) {
+    return `no picks of ${id}; nothing rejected`;
+  }
+  return `rejected ${id}: removed ${held.picks} picks of ${held.songs} song${held.songs === 1 ? '' : 's'}`;
+}
+
+function trackId(target: string | undefined): string {
+  if (!target || !SPOTIFY_TRACK_ID.test(target)) {
+    throw new UsageError(`"${target ?? ''}" is not a Spotify track id`);
+  }
+  return target;
 }
 
 function services(target: string | undefined): Service[] {
