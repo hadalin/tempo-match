@@ -13,7 +13,7 @@ const HTTP_SERVICE_UNAVAILABLE = 503;
  * The collector's port on the compose network: health and the matcher's minute reports. Health
  * fails while problems() names any, answering them as the body.
  */
-export function collectorServer(received: Reports, problems: () => string[], now: () => number = Date.now): Server {
+export function collectorServer(received: Reports, problems: () => string[]): Server {
   return createServer((req, res) => {
     if (req.method === 'GET' && req.url === '/healthz') {
       const found = problems();
@@ -42,7 +42,7 @@ export function collectorServer(received: Reports, problems: () => string[], now
         res.writeHead(HTTP_BAD_REQUEST).end();
         return;
       }
-      received.accept(report, now());
+      received.accept(report);
       res.writeHead(HTTP_NO_CONTENT).end();
     });
   });

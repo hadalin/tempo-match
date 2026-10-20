@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { catalogReader } from './catalog-reader.ts';
-import { counters, flags, reporter } from './flags.ts';
+import { flags, reporter } from './flags.ts';
 import { fixedWindow, InvalidRateLimitError, parseRateLimit, type RateLimiter } from './rate-limit.ts';
 import { matcherServer } from './server.ts';
 
@@ -29,15 +29,14 @@ function loadRateLimiter(): RateLimiter | undefined {
 const market = (process.env.SPOTIFY_MARKET || DEFAULT_MARKET).toUpperCase();
 const catalog = catalogReader(join(process.env.DATA_DIR || '.', CATALOG_FILE));
 const flagged = flags();
-const counted = counters();
 const collectorUrl = process.env.COLLECTOR_URL;
 if (collectorUrl) {
-  const report = reporter(collectorUrl, market, flagged, counted);
+  const report = reporter(collectorUrl, market, flagged);
   setInterval(() => void report.push(), REPORT_EVERY_MS);
 }
 
 const port = Number(process.env.PORT) || DEFAULT_PORT;
-const server = matcherServer({ catalog, market, flags: flagged, counters: counted, rateLimiter: loadRateLimiter() });
+const server = matcherServer({ catalog, market, flags: flagged, rateLimiter: loadRateLimiter() });
 server.listen(port, () => {
   console.log(`tempo-match listening on http://localhost:${port}`);
 });

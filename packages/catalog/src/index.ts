@@ -1,7 +1,6 @@
 export { identityOf } from './identity.ts';
 export { normalize, normalizeTitle } from './normalize.ts';
 export {
-  COUNTRY_DAYS,
   DAY_MS,
   MIN_SONG_SECONDS,
   MISS_LIFETIME_MS,
@@ -38,8 +37,6 @@ export {
   MAX_REPORT_BYTES,
   MAX_SUSPECTS,
   parseReport,
-  type Counter,
-  type CountryCounts,
   type Report,
   type Suspect,
 } from './report.ts';

@@ -6,7 +6,6 @@ export const PICK_LIFETIME_MS = 180 * DAY_MS;
 export const REFRESH_AFTER_MS = PICK_LIFETIME_MS - 7 * DAY_MS;
 export const MISS_LIFETIME_MS = PICK_LIFETIME_MS;
 export const UNSEEN_LISTING_MS = 90 * DAY_MS;
-export const COUNTRY_DAYS = 30;
 export const TEMPO_TOLERANCE_BPM = 3;
 // Spotify documents tracks at or above this speechiness as probably all spoken words.
 export const SPOKEN_WORD_SPEECHINESS = 0.66;
@@ -140,7 +139,6 @@ export function transitions(db: DatabaseSync): Transitions {
     [db.prepare('DELETE FROM misses WHERE looked_up_at <= ?'), (_, now) => [now - MISS_LIFETIME_MS]],
     [db.prepare('DELETE FROM misses WHERE market <> ?'), (market) => [market]],
     [db.prepare('DELETE FROM songs WHERE seen_at <= ?'), (_, now) => [now - UNSEEN_LISTING_MS]],
-    [db.prepare('DELETE FROM country_daily WHERE day <= ?'), (_, now) => [utcDay(now) - COUNTRY_DAYS]],
     [db.prepare(`
       INSERT INTO picks (market, bpm, identity, spotify_track_id, looked_up_at, tempo, speechiness, features_at, shuffle)
       SELECT p.market, s.bpm, s.identity, p.spotify_track_id, p.looked_up_at, p.tempo, p.speechiness, p.features_at, ${SHUFFLE}

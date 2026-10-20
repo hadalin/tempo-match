@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
 import type { MatcherQueries } from '@tempo-match/catalog';
-import { counters, flags } from '../src/flags.ts';
+import { flags } from '../src/flags.ts';
 import { fixedWindow, InvalidRateLimitError, parseRateLimit } from '../src/rate-limit.ts';
 import { matcherServer } from '../src/server.ts';
 
@@ -20,7 +20,6 @@ const server = matcherServer({
   catalog: { queries: () => queries, close() {} },
   market: 'US',
   flags: flags(),
-  counters: counters(),
   rateLimiter: fixedWindow({ count: 2, windowSeconds: 10 }, () => now),
 });
 let base = '';

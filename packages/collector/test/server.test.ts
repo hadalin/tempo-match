@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import type { DatabaseSync } from 'node:sqlite';
 import { mock, test } from 'node:test';
-import { identityOf, MAX_REPORT_BYTES, parseReport, SOURCE_GETSONGBPM, utcDay } from '@tempo-match/catalog';
+import { identityOf, MAX_REPORT_BYTES, parseReport, SOURCE_GETSONGBPM } from '@tempo-match/catalog';
 import { runCommand } from '../src/commands.ts';
 import { CallKind, dispatcher } from '../src/dispatcher.ts';
 import { RateLimitedError, UnauthorizedError } from '../src/errors.ts';
@@ -14,13 +14,14 @@ import { memoryCatalog } from './catalog.ts';
 import { fakeClock, NOW } from './fake-clock.ts';
 
 const ID = 'A'.repeat(22);
-const COUNTS = { served: 3, fallback: 2, empty: 1, dead: 0 };
-const REPORT = { suspects: [{ market: 'US', spotifyTrackId: ID }], countries: { US: COUNTS, SI: COUNTS } };
+const REPORT = { suspects: [{ market: 'US', spotifyTrackId: ID }] };
+// A matcher that still counts countries may report to the collector during a redeploy.
+const COUNTING_REPORT = { ...REPORT, countries: { US: { served: 3, fallback: 2, empty: 1, dead: 0 } } };
 
 async function serve(t: { after(fn: () => void): void }, problems = (db: DatabaseSync) => awaitingOperator(db)) {
   const { db } = memoryCatalog();
-  const received = reports(db);
-  const server = collectorServer(received, () => problems(db), () => NOW);
+  const received = reports();
+  const server = collectorServer(received, () => problems(db));
   await new Promise<void>((resolve) => server.listen(0, resolve));
   t.after(() => server.close());
   const base = `http://localhost:${(server.address() as AddressInfo).port}`;
@@ -28,15 +29,22 @@ async function serve(t: { after(fn: () => void): void }, problems = (db: Databas
   return { db, received, base, post };
 }
 
-test('accepts a report, keeping its suspects and adding its counts to the day', async (t) => {
-  const { db, received, post } = await serve(t);
+test('accepts a report, keeping its suspects', async (t) => {
+  const { received, post } = await serve(t);
 
   assert.equal((await post(JSON.stringify(REPORT))).status, 204);
-  assert.equal((await post(JSON.stringify({ ...REPORT, suspects: [] }))).status, 204);
-
+  assert.deepEqual(received.suspects(), REPORT.suspects);
+  assert.equal((await post(JSON.stringify({ suspects: [] }))).status, 204);
   assert.deepEqual(received.suspects(), []);
-  const us = db.prepare("SELECT day, served, fallback, empty, dead FROM country_daily WHERE country = 'US'").get();
-  assert.deepEqual({ ...us }, { day: utcDay(NOW), served: 6, fallback: 4, empty: 2, dead: 0 });
+});
+
+test('accepts a report with country counts, keeping its suspects and storing no counts', async (t) => {
+  const { db, received, post } = await serve(t);
+
+  assert.equal((await post(JSON.stringify(COUNTING_REPORT))).status, 204);
+
+  assert.deepEqual(received.suspects(), REPORT.suspects);
+  assert.equal(db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'country_daily'").get(), undefined);
 });
 
 test('rejects a malformed report and one over 64 KB', async (t) => {
@@ -94,15 +102,13 @@ test('fails health checks while a failure holds an upstream until an operator un
   assert.deepEqual(await health(), [200, 'ok']);
 });
 
-test('a report of 200 suspects and every two-letter country fits in 64 KB', () => {
-  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  const countries = Object.fromEntries([...letters].flatMap((a) => [...letters].map((b) => [a + b, { served: 99999, fallback: 99999, empty: 99999, dead: 99999 }])));
+test('a report of 200 suspects fits in 64 KB', () => {
   const suspects = Array.from({ length: 200 }, (_, i) => ({ market: 'US', spotifyTrackId: String(i).padStart(22, 'A') }));
-  const text = JSON.stringify({ suspects, countries });
+  const text = JSON.stringify({ suspects });
 
   assert.ok(text.length < MAX_REPORT_BYTES, `${text.length} bytes`);
   assert.equal(parseReport(text)?.suspects.length, 200);
-  assert.equal(parseReport(JSON.stringify({ suspects: [...suspects, suspects[0]], countries })), null);
+  assert.equal(parseReport(JSON.stringify({ suspects: [...suspects, suspects[0]] })), null);
 });
 
 test('acceptance needs a GetSongBPM pass and 5 checked ids at every BPM 60-210', () => {
@@ -129,19 +135,17 @@ test('acceptance needs a GetSongBPM pass and 5 checked ids at every BPM 60-210',
   assert.match(acceptance(db, 'US', NOW, Verification.Checked), /held for its response format/);
 });
 
-test('status reports services, catalog, picks and countries', () => {
+test('status reports services, catalog and picks', () => {
   const { db, t } = memoryCatalog();
   const identity = identityOf('Song', 'A');
   t.upsertListings([{ identity, bpm: 120, title: 'Song', artist: 'A', popularity: 0.5, source: SOURCE_GETSONGBPM }], NOW);
   t.applyLookup('US', identity, ID, NOW);
-  reports(db).accept(REPORT, NOW);
-
   const out = runCommand(['status'], { db, path: ':memory:', market: 'US', verification: Verification.Checked, now: NOW });
 
   assert.match(out, /spotify: 0 calls today, 0 re-check searches, 0 failures/);
   assert.match(out, /1 songs at 1 BPMs/);
   assert.match(out, /1 ids at 1 BPMs/);
-  assert.match(out, /US: served 3, fallback 2, empty 1, dead 0/);
+  assert.doesNotMatch(out, /Countries/);
 });
 
 test('names BPM ranges compactly', () => {

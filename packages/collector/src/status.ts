@@ -126,12 +126,6 @@ export function status(
   lines.push(`  misses: ${missed.map((row) => `${row.reason} ${row.n}`).join(', ') || 'none'}`);
   lines.push(`  acceptance: ${acceptance(db, market, now, verification)}`);
 
-  lines.push('Countries today (UTC)');
-  const countries = db.prepare('SELECT * FROM country_daily WHERE day = ? ORDER BY served + fallback DESC').all(utcDay(now));
-  for (const row of countries) {
-    lines.push(`  ${row.country}: served ${row.served}, fallback ${row.fallback}, empty ${row.empty}, dead ${row.dead}`);
-  }
-
   const wal = walBytes(path);
   lines.push(`WAL ${(wal / MB).toFixed(1)} MB${wal > WAL_WARNING_BYTES ? ' (large: checkpoints are not keeping up)' : ''}`);
   return lines.join('\n');

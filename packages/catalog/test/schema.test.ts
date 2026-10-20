@@ -44,6 +44,20 @@ test('the reader refuses a file without the schema, then opens it read-only', (t
   writer.close();
 });
 
+test('the writer drops the retired country counts from a catalog, keeping its songs', (t) => {
+  const path = tempFile(t);
+  const old = openWriter(path);
+  old.exec("CREATE TABLE country_daily (day INTEGER NOT NULL, country TEXT NOT NULL, PRIMARY KEY (day, country)) STRICT, WITHOUT ROWID");
+  old.exec("INSERT INTO songs (identity, bpm, title, artist, popularity, sources, status, seen_at) VALUES ('s', 120, 'S', 'A', 0.5, 1, 'ok', 0)");
+  old.close();
+
+  const db = openWriter(path);
+  assert.equal(db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'country_daily'").get(), undefined);
+  assert.equal(db.prepare('SELECT count(*) AS n FROM songs').get()?.n, 1);
+  assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, SCHEMA_VERSION);
+  db.close();
+});
+
 test('the writer refuses a file of another schema version', (t) => {
   const path = tempFile(t);
   const other = new DatabaseSync(path);

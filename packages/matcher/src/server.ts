@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { DAY_MS, isTrackId, MAX_BPM, MIN_BPM, type Counter, type ServedSong } from '@tempo-match/catalog';
+import { DAY_MS, isTrackId, MAX_BPM, MIN_BPM, type ServedSong } from '@tempo-match/catalog';
 import { contentVersion, versionUrls } from './asset-version.ts';
 import type { CatalogReader } from './catalog-reader.ts';
-import { ipPrefix, type Counters, type Flags } from './flags.ts';
+import { ipPrefix, type Flags } from './flags.ts';
 import type { RateLimiter } from './rate-limit.ts';
 
 const HTML = 'text/html; charset=utf-8';
@@ -117,7 +117,6 @@ export interface MatcherOptions {
   /** The market whose picks every visitor gets. */
   market: string;
   flags: Flags;
-  counters: Counters;
   rateLimiter?: RateLimiter;
   now?: () => number;
   random?: () => number;
@@ -203,16 +202,14 @@ function health(res: ServerResponse, { catalog, market, now = Date.now }: Matche
 }
 
 function answerSong(req: IncomingMessage, url: URL, res: ServerResponse, options: MatcherOptions): void {
-  const { market, flags, counters, now = Date.now, random = Math.random } = options;
+  const { market, flags, now = Date.now, random = Math.random } = options;
   const queries = options.catalog.queries()!;
   const time = now();
-  const country = visitorCountry(req) ?? UNKNOWN_COUNTRY;
+  const country = visitorCountry(req);
   const skip = trackParam(url.searchParams.get('skip'));
   const dead = trackParam(url.searchParams.get('dead'));
-  const count = (counter: Counter) => counters.add(country, counter);
 
   if (dead && queries.isPick(market, dead, time)) {
-    count('dead');
     const prefix = ipPrefix(visitorIp(req));
     if (country === market && prefix) {
       flags.flag(dead, prefix, time);
@@ -224,7 +221,6 @@ function answerSong(req: IncomingMessage, url: URL, res: ServerResponse, options
   if (url.searchParams.get('lucky') === '1') {
     song = queries.lucky(market, excludeBpm(url.searchParams.get('exclude')) ?? NO_BPM, excluded, time, random());
     if (!song) {
-      count('empty');
       sendJson(res, HTTP_NOT_FOUND, { error: 'No song found, try again later' });
       return;
     }
@@ -236,13 +232,11 @@ function answerSong(req: IncomingMessage, url: URL, res: ServerResponse, options
     }
     song = queries.songAt(market, bpm, excluded, time, random());
     if (!song) {
-      count('empty');
       sendEmpty(res, bpm);
       return;
     }
   }
 
-  count(country === market ? 'served' : 'fallback');
   sendJson(res, HTTP_OK, song);
 }
 

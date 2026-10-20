@@ -100,16 +100,6 @@ CREATE TABLE upstream (
 INSERT INTO upstream (service, day, calls, recheck_calls, banned_until, held_until, failures)
 VALUES ${SERVICES.map((s) => `('${s}', 0, 0, 0, 0, 0, 0)`).join(', ')};
 
-CREATE TABLE country_daily (
-  day INTEGER NOT NULL,
-  country TEXT NOT NULL,
-  served INTEGER NOT NULL,
-  fallback INTEGER NOT NULL,
-  empty INTEGER NOT NULL,
-  dead INTEGER NOT NULL,
-  PRIMARY KEY (day, country)
-) STRICT, WITHOUT ROWID;
-
 PRAGMA user_version = ${SCHEMA_VERSION};
 `;
 
@@ -134,6 +124,9 @@ export function openWriter(path: string): DatabaseSync {
     db.close();
     throw new SchemaVersionError(path, version);
   }
+  // Catalogs from before per-country counts were dropped still hold this table; dropping it in
+  // place keeps the version, so either release reads the file and it is never rebuilt.
+  db.exec('DROP TABLE IF EXISTS country_daily');
   return db;
 }
 

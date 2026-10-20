@@ -46,7 +46,7 @@ const config = loadConfig();
 const clock = systemClock;
 const db = openWriter(config.catalogPath);
 const t = transitions(db);
-const received = reports(db);
+const received = reports();
 let tickedAt = clock.monotonic();
 
 async function loop(name: string, step: () => Promise<unknown>) {

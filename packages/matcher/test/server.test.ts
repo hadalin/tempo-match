@@ -7,7 +7,7 @@ import { after, before, test } from 'node:test';
 import { identityOf, openWriter, SOURCE_GETSONGBPM, transitions } from '@tempo-match/catalog';
 import { contentVersion } from '../src/asset-version.ts';
 import { catalogReader, type CatalogReader } from '../src/catalog-reader.ts';
-import { counters, flags } from '../src/flags.ts';
+import { flags } from '../src/flags.ts';
 import { matcherServer } from '../src/server.ts';
 
 const A = 'A'.repeat(22);
@@ -32,8 +32,7 @@ for (const { title, bpm, id } of SONGS) {
 
 const reader = catalogReader(path);
 const flagged = flags();
-const counted = counters();
-const server = matcherServer({ catalog: reader, market: 'US', flags: flagged, counters: counted, now: () => NOW });
+const server = matcherServer({ catalog: reader, market: 'US', flags: flagged, now: () => NOW });
 let base = '';
 
 function versionOf(file: string): string {
@@ -370,19 +369,6 @@ for (const target of ['//', '//[']) {
   });
 }
 
-test('counts songs served to the market, to other countries and empty answers', async () => {
-  counted.take();
-
-  await song('bpm=120', { 'CF-IPCountry': 'US' });
-  await song('bpm=120', { 'CF-IPCountry': 'SI' });
-  await song('bpm=121', { 'CF-IPCountry': 'SI' });
-
-  assert.deepEqual(counted.take(), {
-    US: { served: 1, fallback: 0, empty: 0, dead: 0 },
-    SI: { served: 0, fallback: 1, empty: 1, dead: 0 },
-  });
-});
-
 test('three IP prefixes in the market flagging a pick make it a suspect', async () => {
   for (const ip of ['192.0.2.1', '192.0.2.2', '198.51.100.1', '2001:db8:1::1']) {
     const { body } = await song(`bpm=120&dead=${A}`, { 'CF-IPCountry': 'US', 'CF-Connecting-IP': ip });
@@ -392,24 +378,22 @@ test('three IP prefixes in the market flagging a pick make it a suspect', async 
   assert.deepEqual(flagged.suspects(NOW), [A]);
 });
 
-test('a flag from another country is counted but never makes a suspect', async () => {
-  counted.take();
-
+test('a flag from another country never makes a suspect', async () => {
   for (const ip of ['203.0.113.1', '203.0.114.1', '203.0.115.1']) {
     await song(`bpm=97&dead=${LUCKY}`, { 'CF-IPCountry': 'SI', 'CF-Connecting-IP': ip });
   }
 
-  assert.equal(counted.take().SI.dead, 3);
   assert.ok(!flagged.suspects(NOW).includes(LUCKY));
 });
 
 test('ignores a dead id that is malformed or not a pick', async () => {
-  counted.take();
+  const notPick = 'Z'.repeat(22);
+  for (const ip of ['203.0.113.1', '203.0.114.1', '203.0.115.1']) {
+    await song(`bpm=120&dead=short`, { 'CF-IPCountry': 'US', 'CF-Connecting-IP': ip });
+    await song(`bpm=120&dead=${notPick}`, { 'CF-IPCountry': 'US', 'CF-Connecting-IP': ip });
+  }
 
-  await song(`bpm=120&dead=short`, { 'CF-IPCountry': 'US' });
-  await song(`bpm=120&dead=${'Z'.repeat(22)}`, { 'CF-IPCountry': 'US' });
-
-  assert.equal(counted.take().US.dead, 0);
+  assert.ok(!flagged.suspects(NOW).includes(notPick));
 });
 
 test('a lucky request returns a pick at another BPM', async () => {
@@ -447,7 +431,7 @@ test('reports picks and the oldest pick age on /healthz', async () => {
 test('answers 503 while the catalog does not exist yet', async (t) => {
   const missing = catalogReader(join(dir, 'missing.db'));
   t.mock.method(console, 'error', () => {});
-  const other = await listen({ catalog: missing, market: 'US', flags: flags(), counters: counters() });
+  const other = await listen({ catalog: missing, market: 'US', flags: flags() });
   t.after(() => missing.close());
 
   const api = await fetch(`${other}/api/song?bpm=120`);
@@ -461,7 +445,7 @@ test('answers 503 with a short Retry-After while the database is busy', async ()
   const busy = Object.assign(new Error('database is locked'), { errcode: 5 });
   const queries = { songAt: () => { throw busy; }, lucky: () => null, isPick: () => false, summary: () => ({ picks: 0, oldestLookedUpAt: null }) };
   const catalog: CatalogReader = { queries: () => queries, close() {} };
-  const other = await listen({ catalog, market: 'US', flags: flags(), counters: counters() });
+  const other = await listen({ catalog, market: 'US', flags: flags() });
 
   const res = await fetch(`${other}/api/song?bpm=120`);
 

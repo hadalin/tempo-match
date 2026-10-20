@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseReport } from '@tempo-match/catalog';
-import { counters, flags, ipPrefix, reporter } from '../src/flags.ts';
+import { flags, ipPrefix, reporter } from '../src/flags.ts';
 
 const A = 'A'.repeat(22);
 const B = 'B'.repeat(22);
@@ -75,42 +75,34 @@ test('keeps at most 10,000 flagged ids', () => {
   assert.deepEqual(f.suspects(NOW), []);
 });
 
-test('pushes the suspects and the counts since the last push, as a valid report', async () => {
+test('pushes the suspects as a valid report', async () => {
   const f = flags();
   for (const prefix of ['a', 'b', 'c']) {
     f.flag(A, prefix, NOW);
   }
-  const c = counters();
-  c.add('US', 'served');
   const bodies: string[] = [];
   const fetch = (async (url: URL, init: RequestInit) => {
     assert.equal(String(url), 'http://collector:3001/reports');
     bodies.push(String(init.body));
     return new Response(null, { status: 204 });
   }) as unknown as typeof globalThis.fetch;
-  const r = reporter('http://collector:3001', 'US', f, c, fetch, () => NOW);
+  const r = reporter('http://collector:3001', 'US', f, fetch, () => NOW);
 
   await r.push();
-  await r.push();
 
-  assert.deepEqual(parseReport(bodies[0]), {
-    suspects: [{ market: 'US', spotifyTrackId: A }],
-    countries: { US: { served: 1, fallback: 0, empty: 0, dead: 0 } },
-  });
-  assert.deepEqual(parseReport(bodies[1])?.countries, {});
+  assert.deepEqual(JSON.parse(bodies[0]), { suspects: [{ market: 'US', spotifyTrackId: A }] });
+  assert.deepEqual(parseReport(bodies[0]), JSON.parse(bodies[0]));
 });
 
 test('never overlaps pushes and drops a failed one', async (t) => {
   t.mock.method(console, 'error', () => {});
-  const c = counters();
-  c.add('US', 'served');
   let calls = 0;
   const pending = Promise.withResolvers<Response>();
   const fetch = (async () => {
     calls++;
     return pending.promise;
   }) as unknown as typeof globalThis.fetch;
-  const r = reporter('http://collector:3001', 'US', flags(), c, fetch);
+  const r = reporter('http://collector:3001', 'US', flags(), fetch);
 
   const first = r.push();
   await r.push();
@@ -118,5 +110,4 @@ test('never overlaps pushes and drops a failed one', async (t) => {
   await first;
 
   assert.equal(calls, 1);
-  assert.deepEqual(c.take(), {});
 });

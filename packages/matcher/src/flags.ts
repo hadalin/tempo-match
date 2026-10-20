@@ -1,4 +1,4 @@
-import { MAX_SUSPECTS, type Counter, type CountryCounts, type Report } from '@tempo-match/catalog';
+import { MAX_SUSPECTS, type Report } from '@tempo-match/catalog';
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -85,30 +85,8 @@ export function ipPrefix(ip: string): string | null {
   return groups.slice(0, IPV6_PREFIX_GROUPS).map((group) => parseInt(group, 16).toString(16)).join(':');
 }
 
-/** Per-country request counts since the last take. */
-export interface Counters {
-  add(country: string, counter: Counter): void;
-  take(): Record<string, CountryCounts>;
-}
-
-export function counters(): Counters {
-  let counts = new Map<string, CountryCounts>();
-  return {
-    add(country, counter) {
-      const entry = counts.get(country) ?? { served: 0, fallback: 0, empty: 0, dead: 0 };
-      entry[counter]++;
-      counts.set(country, entry);
-    },
-    take() {
-      const taken = Object.fromEntries(counts);
-      counts = new Map();
-      return taken;
-    },
-  };
-}
-
 export interface Reporter {
-  /** Sends the current suspects and the counts since the last push; never overlaps or retries. */
+  /** Sends the current suspects; never overlaps or retries. */
   push(): Promise<void>;
 }
 
@@ -118,7 +96,6 @@ export function reporter(
   url: string,
   market: string,
   flagged: Flags,
-  counted: Counters,
   fetchFn: typeof fetch = fetch,
   now: () => number = Date.now,
 ): Reporter {
@@ -132,7 +109,6 @@ export function reporter(
       pushing = true;
       const report: Report = {
         suspects: flagged.suspects(now()).map((spotifyTrackId) => ({ market, spotifyTrackId })),
-        countries: counted.take(),
       };
       try {
         const res = await fetchFn(new URL('/reports', url), {
