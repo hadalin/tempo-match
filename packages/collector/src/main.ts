@@ -13,7 +13,7 @@ import {
 import { dispatcher } from './dispatcher.ts';
 import { MissingConfigError, RefusedError } from './errors.ts';
 import { getSongBpm } from './getsongbpm.ts';
-import { DEEZER, GETSONGBPM, RECCOBEATS, SPOTIFY } from './policies.ts';
+import { DEEZER, GETSONGBPM, RECCOBEATS, spotifyPolicy } from './policies.ts';
 import { reccoBeats } from './reccobeats.ts';
 import { reports } from './reports.ts';
 import { featureChecks, spotifyJobs } from './scheduler.ts';
@@ -96,7 +96,7 @@ for (const source of sources) {
   void loop(source.name, crawler(db, t, source, clock).step);
 }
 
-const spotifyCalls = dispatcher(db, SPOTIFY, clock);
+const spotifyCalls = dispatcher(db, spotifyPolicy(config.spotifyDailyCalls), clock);
 const lookup = spotify({ clientId: config.spotifyClientId, clientSecret: config.spotifyClientSecret }, spotifyCalls);
 const jobs = spotifyJobs(db, {
   market: config.market,

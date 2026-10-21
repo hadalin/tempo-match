@@ -1,5 +1,6 @@
 import { join } from 'node:path';
-import { MissingConfigError } from './errors.ts';
+import { InvalidConfigError, MissingConfigError } from './errors.ts';
+import { DEFAULT_SPOTIFY_DAILY_CALLS } from './policies.ts';
 
 const DEFAULT_MARKET = 'US';
 const DEFAULT_PORT = 3001;
@@ -15,6 +16,7 @@ export interface Config {
   spotifyClientSecret: string;
   /** The one market whose picks are collected and served to every country. */
   market: string;
+  spotifyDailyCalls: number;
   deezer: boolean;
   reccoBeats: boolean;
   catalogPath: string;
@@ -40,9 +42,21 @@ export function collectorConfig(env: Env): Config {
     getSongBpmApiKey: env.GETSONGBPM_API_KEY!,
     spotifyClientId: env.SPOTIFY_CLIENT_ID!,
     spotifyClientSecret: env.SPOTIFY_CLIENT_SECRET!,
+    spotifyDailyCalls: spotifyDailyCalls(env.SPOTIFY_DAILY_CALLS),
     deezer: isEnabled(env.DEEZER_ENABLED),
     port: Number(env.PORT) || DEFAULT_PORT,
   };
+}
+
+function spotifyDailyCalls(value: string | undefined): number {
+  if (!value) {
+    return DEFAULT_SPOTIFY_DAILY_CALLS;
+  }
+  const calls = Number(value);
+  if (!/^\d+$/.test(value) || calls <= 0) {
+    throw new InvalidConfigError('SPOTIFY_DAILY_CALLS', value, 'a positive whole number');
+  }
+  return calls;
 }
 
 function isEnabled(flag: string | undefined): boolean {

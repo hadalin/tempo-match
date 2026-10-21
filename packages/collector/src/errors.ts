@@ -74,6 +74,13 @@ export class MissingConfigError extends Error {
   }
 }
 
+export class InvalidConfigError extends Error {
+  constructor(name: string, value: string, expected: string) {
+    super(`Invalid environment variable ${name}=${value}: expected ${expected}`);
+    this.name = 'InvalidConfigError';
+  }
+}
+
 /**
  * Whether a call that failed this way can succeed later: the dispatcher stored a ban or a hold,
  * or refused to send. Other failures, such as a 400, would repeat on every attempt.
